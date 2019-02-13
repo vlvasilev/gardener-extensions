@@ -73,6 +73,9 @@ docker-image-os-coreos:
 docker-image-os-coreos-alicloud:
 	@docker build --build-arg VERIFY=$(VERIFY) -t $(IMAGE_PREFIX)/gardener-extension-os-coreos-alicloud:$(VERSION) -t $(IMAGE_PREFIX)/gardener-extension-os-coreos-alicloud:$(VERSION) -f Dockerfile --target gardener-extension-os-coreos-alicloud .
 
+.PHONY: docker-image-provider-aws
+docker-image-provider-aws:
+	@docker build --build-arg VERIFY=$(VERIFY) -t $(IMAGE_PREFIX)/gardener-extension-provider-aws:$(VERSION) -t $(IMAGE_PREFIX)/gardener-extension-provider-aws:$(VERSION) -f Dockerfile --target gardener-extension-provider-aws .
 
 .PHONY: docker-images
 docker-images: docker-image-hyper docker-image-os-coreos docker-image-os-coreos-alicloud
@@ -90,3 +93,7 @@ start-os-coreos:
 .PHONY: start-os-coreos-alicloud
 start-os-coreos-alicloud:
 	@LEADER_ELECTION_NAMESPACE=garden go run -ldflags $(LD_FLAGS) ./controllers/os-coreos-alicloud/cmd/gardener-extension-os-coreos-alicloud
+
+.PHONY: start-provider-aws
+start-provider-aws:
+	@LEADER_ELECTION_NAMESPACE=garden go run -ldflags $(LD_FLAGS) ./controllers/provider-aws/cmd/gardener-extension-provider-aws
