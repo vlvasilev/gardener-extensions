@@ -150,6 +150,17 @@ func (c *actuator) reconcile(ctx context.Context, infrastructure *extensionsv1al
 		},
 		"clusterName": infrastructure.Spec.SecretRef.Namespace,
 		"zones":       getZones(infrastructure, infrastructureConfig),
+		"outputkeys": map[string]interface{}{
+			"vpcIdKey":                   awstypes.VPCIDKey,
+			"subnetsPublicPrefix":        awstypes.SubnetPublicPrefix,
+			"subnetsNodesPrefix":         awstypes.SubnetNodesPrefix,
+			"securityGroupsNodes":        awstypes.SecurityGroupsNodes,
+			"sshKeyName":                 awstypes.SSHKeyName,
+			"iamInstanceProfileNodes":    awstypes.IAMInstanceProfileNodes,
+			"iamInstanceProfileBastions": awstypes.IAMInstanceProfileBastions,
+			"nodesRole":                  awstypes.NodesRole,
+			"bastionsRole":               awstypes.BastionsRole,
+		},
 	}
 
 	chartRenderer, err := chartrenderer.New(c.kubernetes)

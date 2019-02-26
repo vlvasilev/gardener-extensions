@@ -3,6 +3,10 @@ package infrastructure
 import (
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/runtime"
+	kutils "k8s.io/apimachinery/pkg/util/runtime"
+	"strconv"
+	"strings"
 
 	"github.com/gardener/gardener-extensions/controllers/provider-aws/pkg/apis/aws/v1alpha1"
 	awstypes "github.com/gardener/gardener-extensions/controllers/provider-aws/pkg/aws"
@@ -102,7 +106,20 @@ func (c *actuator) destroyKubernetesLoadBalancersAndSecurityGroups(namespace str
 }
 
 func (c *actuator) injectProviderStateIntoStatus(ctx context.Context, tf *terraformer.Terraformer, infrastructure *extensionsv1alpha1.Infrastructure) error {
-	values, err := tf.GetStateOutputVariables(awstypes.VPCIDKey, awstypes.SSHKeyName, awstypes.IAMInstanceProfileNodes, awstypes.SubnetNodes, awstypes.SubnetPublic, awstypes.NodesRole)
+	outputVarKeys := []string{
+		awstypes.VPCIDKey,
+		awstypes.SSHKeyName,
+		awstypes.IAMInstanceProfileNodes,
+		awstypes.NodesRole,
+		awstypes.SecurityGroupsNodes,
+	}
+
+	for zoneIndex := range infrastructure.Spec.Zones {
+		outputVarKeys = append(outputVarKeys, fmt.Sprintf("%s%d", awstypes.SubnetNodesPrefix, zoneIndex))
+		outputVarKeys = append(outputVarKeys, fmt.Sprintf("%s%d", awstypes.SubnetPublicPrefix, zoneIndex))
+	}
+
+	values, err := tf.GetStateOutputVariables(outputVarKeys...)
 	if err != nil {
 		return err
 	}
@@ -120,18 +137,53 @@ func (c *actuator) injectProviderStateIntoStatus(ctx context.Context, tf *terraf
 				ARN:     values[awstypes.NodesRole],
 			},
 		}
+		subnets = func(values map[string]string) []v1alpha1.Subnet {
+			var subnetsToReturn []v1alpha1.Subnet
+			for key, value := range values {
+				if strings.HasPrefix(key, awstypes.SubnetPublicPrefix) {
+					zoneID, err := strconv.Atoi(strings.TrimPrefix(key, awstypes.SubnetPublicPrefix))
+					kutils.Must(err)
+
+					subnetsToReturn = append(subnetsToReturn, v1alpha1.Subnet{
+						Name: key,
+						ID:   value,
+						Zone: infrastructure.Spec.Zones[zoneID],
+					})
+				}
+				if strings.HasPrefix(key, awstypes.SubnetNodesPrefix) {
+					zoneID, err := strconv.Atoi(strings.TrimPrefix(key, awstypes.SubnetNodesPrefix))
+					kutils.Must(err)
+					subnetsToReturn = append(subnetsToReturn, v1alpha1.Subnet{
+						Name: key,
+						ID:   value,
+						Zone: infrastructure.Spec.Zones[zoneID],
+					})
+				}
+			}
+			return subnetsToReturn
+		}(values)
+		securityGroups = []v1alpha1.SecurityGroup{
+			{
+				Name: awstypes.SecurityGroupsNodes,
+				ID:   values[awstypes.SecurityGroupsNodes],
+			},
+		}
 	)
 
-	infrastructure.Status.ProviderStatus.Object = &v1alpha1.InfrastructureStatus{
-		VPC: v1alpha1.VPC{
-			ID: values[awstypes.VPCIDKey],
-		},
-		EC2: v1alpha1.EC2{
-			KeyName: values[awstypes.SSHKeyName],
-		},
-		IAM: v1alpha1.IAM{
-			InstanceProfiles: instanceProfiles,
-			Roles:            roles,
+	infrastructure.Status.ProviderStatus = &runtime.RawExtension{
+		Object: &v1alpha1.InfrastructureStatus{
+			VPC: v1alpha1.VPC{
+				ID:             values[awstypes.VPCIDKey],
+				Subnets:        subnets,
+				SecurityGroups: securityGroups,
+			},
+			EC2: v1alpha1.EC2{
+				KeyName: values[awstypes.SSHKeyName],
+			},
+			IAM: v1alpha1.IAM{
+				InstanceProfiles: instanceProfiles,
+				Roles:            roles,
+			},
 		},
 	}
 	return c.client.Status().Update(ctx, infrastructure)
