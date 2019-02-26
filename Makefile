@@ -96,4 +96,4 @@ start-os-coreos-alicloud:
 
 .PHONY: start-provider-aws
 start-provider-aws:
-	@LEADER_ELECTION_NAMESPACE=garden go run -ldflags $(LD_FLAGS) ./controllers/provider-aws/cmd/gardener-extension-provider-aws
+	@LEADER_ELECTION_NAMESPACE=garden go run -ldflags $(LD_FLAGS) ./controllers/provider-aws/cmd/gardener-extension-provider-aws --config-file=./controllers/provider-aws/example/componentconfig.yaml

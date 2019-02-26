@@ -13,6 +13,6 @@
 // limitations under the License.
 
 // +k8s:deepcopy-gen=package
-// +groupName="aws.provider.extensions.gardener.cloud"
+// +groupName="config.aws.provider.extensions.gardener.cloud"
 
-package aws // import "github.com/gardener/gardener-extensions/controllers/provider-aws/pkg/apis/aws"
+package config // import "github.com/gardener/gardener-extensions/controllers/provider-aws/pkg/apis/config"

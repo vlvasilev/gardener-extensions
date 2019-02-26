@@ -19,18 +19,22 @@ import (
 	"fmt"
 	"os"
 
+	awscmd "github.com/gardener/gardener-extensions/controllers/provider-aws/pkg/cmd"
 	"github.com/gardener/gardener-extensions/controllers/provider-aws/pkg/infrastructure"
-
+	"github.com/gardener/gardener-extensions/controllers/provider-aws/pkg/register"
+	"github.com/gardener/gardener-extensions/controllers/provider-aws/pkg/worker"
 	"github.com/gardener/gardener-extensions/pkg/controller"
 	controllercmd "github.com/gardener/gardener-extensions/pkg/controller/cmd"
+
 	"github.com/spf13/cobra"
+
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
-// Name is the name of the Infrastructure controller.
+// Name is the name of the AWS provider controller.
 const Name = "provider-aws-controller"
 
-// NewControllerCommand creates a new command for running a Infrastructure AWS controller.
+// NewControllerCommand creates a new command for running an AWS provider controller.
 func NewControllerCommand(ctx context.Context) *cobra.Command {
 	var (
 		restOpts = &controllercmd.RESTOptions{}
@@ -38,11 +42,21 @@ func NewControllerCommand(ctx context.Context) *cobra.Command {
 			LeaderElection:          true,
 			LeaderElectionNamespace: os.Getenv("LEADER_ELECTION_NAMESPACE"),
 		}
-		ctrlOpts = &controllercmd.ControllerOptions{
+		infraCtrlOpts = &controllercmd.ControllerOptions{
 			MaxConcurrentReconciles: 5,
 		}
+		workerCtrlOpts = &controllercmd.ControllerOptions{
+			MaxConcurrentReconciles: 5,
+		}
+		configFileOpts = &awscmd.ConfigOptions{}
 
-		aggOption = controllercmd.NewOptionAggregator(restOpts, mgrOpts, ctrlOpts)
+		aggOption = controllercmd.NewOptionAggregator(
+			restOpts,
+			mgrOpts,
+			configFileOpts,
+			controllercmd.PrefixOption("infrastructure-", infraCtrlOpts),
+			controllercmd.PrefixOption("worker-", workerCtrlOpts),
+		)
 	)
 
 	cmd := &cobra.Command{
@@ -62,10 +76,12 @@ func NewControllerCommand(ctx context.Context) *cobra.Command {
 				controllercmd.LogErrAndExit(err, "Could not update manager scheme")
 			}
 
-			ctrlOpts.Completed().Apply(&infrastructure.Options)
+			infraCtrlOpts.Completed().Apply(&infrastructure.Options)
+			workerCtrlOpts.Completed().Apply(&worker.Options)
+			configFileOpts.Completed().ApplyMachineImages(&worker.MachineImages)
 
-			if err := infrastructure.AddToManager(mgr); err != nil {
-				controllercmd.LogErrAndExit(err, "Could not add controller to manager")
+			if err := register.AddToManager(mgr); err != nil {
+				controllercmd.LogErrAndExit(err, "Could not add controllers to manager")
 			}
 
 			if err := mgr.Start(ctx.Done()); err != nil {

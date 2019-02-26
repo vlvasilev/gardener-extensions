@@ -1,4 +1,4 @@
-// Copyright (c) 2018 SAP SE or an SAP affiliate company. All rights reserved. This file is licensed under the Apache Software License, v. 2 except as noted otherwise in the LICENSE file
+// Copyright (c) 2019 SAP SE or an SAP affiliate company. All rights reserved. This file is licensed under the Apache Software License, v. 2 except as noted otherwise in the LICENSE file
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +k8s:deepcopy-gen=package
-// +groupName="aws.provider.extensions.gardener.cloud"
+package worker
 
-package aws // import "github.com/gardener/gardener-extensions/controllers/provider-aws/pkg/apis/aws"
+import "github.com/gardener/gardener-extensions/pkg/controller"
+
+var (
+	addToManagerBuilder = controller.NewAddToManagerBuilder()
+
+	// AddToManager adds all Worker controllers to the given manager.
+	AddToManager = addToManagerBuilder.AddToManager
+)

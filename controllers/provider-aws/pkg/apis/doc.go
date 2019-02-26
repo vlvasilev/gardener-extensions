@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +k8s:deepcopy-gen=package
-// +groupName="aws.provider.extensions.gardener.cloud"
+//go:generate ../../hack/generate-code
 
-package aws // import "github.com/gardener/gardener-extensions/controllers/provider-aws/pkg/apis/aws"
+package apis
