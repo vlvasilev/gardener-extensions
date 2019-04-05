@@ -78,6 +78,10 @@ required = [
   name = "google.golang.org/api"
   version = "0.2.0"
 
+[[constraint]]
+  name = "github.com/aliyun/alibaba-cloud-sdk-go"
+  version = "1.49.2"
+
 # Dependencies for testing purposes only
 
 [[constraint]]
