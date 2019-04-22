@@ -66,12 +66,17 @@ func New(name string, mgr manager.Manager, options Options) (Controller, error) 
 	if len(name) == 0 {
 		return nil, fmt.Errorf("must specify Name for Controller")
 	}
-
+	//set the number of concurent reconsilation to one
 	if options.MaxConcurrentReconciles <= 0 {
 		options.MaxConcurrentReconciles = 1
 	}
 
+	/* Inject the following functions in to the Manager
 	// Inject dependencies into Reconciler
+	func (r *reconciler) InjectFunc(f inject.Func) error {
+	// InjectClient injects the controller runtime client into the reconciler.
+	func (r *reconciler) InjectClient(client client.Client) error
+	func (r *reconciler) InjectScheme(scheme *runtime.Scheme) error*/
 	if err := mgr.SetFields(options.Reconciler); err != nil {
 		return nil, err
 	}

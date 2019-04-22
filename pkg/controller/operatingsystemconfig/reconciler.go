@@ -17,6 +17,7 @@ package operatingsystemconfig
 import (
 	"context"
 	"fmt"
+
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 
 	"github.com/gardener/gardener-extensions/pkg/controller"

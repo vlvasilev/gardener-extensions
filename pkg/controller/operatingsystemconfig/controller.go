@@ -49,6 +49,7 @@ type AddArgs struct {
 
 // Add adds an operatingsystemconfig controller to the given manager using the given AddArgs.
 func Add(mgr manager.Manager, args AddArgs) error {
+	//reconciler reconciles OperatingSystemConfig resources of Gardener's `extensions.gardener.cloud` API group.
 	args.ControllerOptions.Reconciler = NewReconciler(args.Actuator)
 	return add(mgr, args.ControllerOptions, args.Predicates)
 }
@@ -56,11 +57,25 @@ func Add(mgr manager.Manager, args AddArgs) error {
 // DefaultPredicates returns the default predicates for an operatingsystemconfig reconciler.
 func DefaultPredicates(typeName string) []predicate.Predicate {
 	return []predicate.Predicate{
+		/*Check if event.Object.(*extensionsv1alpha1.OperatingSystemConfig).Spec.Type == typeName and if so return true*/
 		TypePredicate(typeName),
+		/*Check if e.MetaOld.GetGeneration() != e.MetaNew.GetGeneration() and is so return True for Update*/
 		extensionscontroller.GenerationChangedPredicate(),
 	}
 }
 
+/*
+  1.set the number of concurent reconsilation to one
+  2.Inject the following functions in to the Manager
+		2.1 Inject dependencies into Reconciler
+			func (r *reconciler) InjectFunc(f inject.Func) error {
+		2.2 InjectClient injects the controller runtime client into the reconciler.
+			func (r *reconciler) InjectClient(client client.Client) error
+		2.3 func (r *reconciler) InjectScheme(scheme *runtime.Scheme) error
+  3.Create controller with dependencies set get from the manager
+  4.Add the controler (register it) to the manager
+  5.Register Watch in the controler to watch for extensionsv1alpha1.OperatingSystemConfig resources related to this type
+  6.Register Watch in the controler to watch for corev1.Secret resources related to this type*/
 func add(mgr manager.Manager, options controller.Options, predicates []predicate.Predicate) error {
 	ctrl, err := controller.New("operatingsystemconfig-controller", mgr, options)
 	if err != nil {

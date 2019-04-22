@@ -16,10 +16,11 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+
 	"github.com/spf13/pflag"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"os"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
@@ -252,6 +253,15 @@ var (
 	RecommendedHomeFile = clientcmd.RecommendedHomeFile
 )
 
+/*IF RESTOptions.Kubeconfig is set retutns a client to authenticate gains kubeapiserver
+  ELSE IF global variable KUBECONFIG is set it used it to make the client.
+  ELSE IF Use the incluster configuration by searching for:
+			tokenFile  = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+			rootCAFile = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+			$KUBERNETES_SERVICE_HOST
+			$KUBERNETES_SERVICE_PORT
+  ELSE Use file under $HOME/.kube.conf
+*/
 func (r *RESTOptions) buildConfig() (*rest.Config, error) {
 	// If a flag is specified with the config location, use that
 	if len(r.Kubeconfig) > 0 {

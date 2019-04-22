@@ -38,10 +38,24 @@ type AddOptions struct {
 // AddToManagerWithOptions adds a controller with the given Options to the given manager.
 // The opts.Reconciler is being set with a newly instantiated actuator.
 func AddToManagerWithOptions(mgr manager.Manager, opts AddOptions) error {
+	/*Add will add reconsiler struct which will hold the new Actuator. This struct has the Recosile function*/
+	// 1.set the number of concurent reconsilation to one
+	// 2.Inject the following functions in to the Manager
+	// 	2.1 Inject dependencies into Reconciler
+	// 		func (r *reconciler) InjectFunc(f inject.Func) error {
+	// 	2.2 InjectClient injects the controller runtime client into the reconciler.
+	// 		func (r *reconciler) InjectClient(client client.Client) error
+	// 	2.3 func (r *reconciler) InjectScheme(scheme *runtime.Scheme) error
+	// 3.Create controller with dependencies set get from the manager
+	// 4.Add the controler (register it) to the manager
+	// 5.Register Watch to watch for extensionsv1alpha1.OperatingSystemConfig resources related to this type
+	// 6.Register Watch to watch for corev1.Secret resources related to this type*/
 	return operatingsystemconfig.Add(mgr, operatingsystemconfig.AddArgs{
-		Actuator:          NewActuator(),
-		ControllerOptions: opts.Controller,
-		Predicates:        operatingsystemconfig.DefaultPredicates(Type),
+		Actuator:          NewActuator(),   // creates a new Actuator that updates the status of the handled OperatingSystemConfigs.
+		ControllerOptions: opts.Controller, // zero recosilation and bear Recosiler intarface
+		/*Check if event.Object.(*extensionsv1alpha1.OperatingSystemConfig).Spec.Type == typeName and if so return true*/
+		/*Check if e.MetaOld.GetGeneration() != e.MetaNew.GetGeneration() and is so return True for Update*/
+		Predicates: operatingsystemconfig.DefaultPredicates(Type),
 	})
 }
 
