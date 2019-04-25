@@ -12,30 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package app
+package generator
 
 import (
-	"context"
-
-	"github.com/gardener/gardener-extensions/controllers/os-suse-jeos/pkg/generator"
-	"github.com/gardener/gardener-extensions/pkg/controller/cmd"
-	"github.com/gardener/gardener-extensions/pkg/controller/operatingsystemconfig/oscommon/app"
-	"github.com/spf13/cobra"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
+	"testing"
 )
 
-// Default options
-var options = &controller.Options{}
-
-// NewControllerCommand returns a new Command with a new Generator
-func NewControllerCommand(ctx context.Context) *cobra.Command {
-
-	g, err := generator.NewCloudInitGenerator()
-	if err != nil {
-		cmd.LogErrAndExit(err, "Could not create Generator")
-	}
-
-	cmd := app.NewControllerCommand(ctx, "suse-jeos", g, options)
-
-	return cmd
+func TestInternal(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Generator Suite")
 }

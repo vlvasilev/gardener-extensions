@@ -12,30 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package app
+package main
 
 import (
-	"context"
+	"fmt"
+	"os"
 
-	"github.com/gardener/gardener-extensions/controllers/os-suse-jeos/pkg/generator"
-	"github.com/gardener/gardener-extensions/pkg/controller/cmd"
-	"github.com/gardener/gardener-extensions/pkg/controller/operatingsystemconfig/oscommon/app"
-	"github.com/spf13/cobra"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"github.com/gardener/gardener-extensions/controllers/os-ubuntu/cmd/gardener-extension-os-ubuntu/app"
+	extcontroller "github.com/gardener/gardener-extensions/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/runtime/log"
 )
 
-// Default options
-var options = &controller.Options{}
+func main() {
+	log.SetLogger(log.ZapLogger(false))
 
-// NewControllerCommand returns a new Command with a new Generator
-func NewControllerCommand(ctx context.Context) *cobra.Command {
+	cmd := app.NewControllerCommand(extcontroller.SetupSignalHandlerContext())
 
-	g, err := generator.NewCloudInitGenerator()
-	if err != nil {
-		cmd.LogErrAndExit(err, "Could not create Generator")
+	if err := cmd.Execute(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
 	}
-
-	cmd := app.NewControllerCommand(ctx, "suse-jeos", g, options)
-
-	return cmd
 }
