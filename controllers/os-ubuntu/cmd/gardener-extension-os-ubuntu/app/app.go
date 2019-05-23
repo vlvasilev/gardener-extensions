@@ -35,7 +35,7 @@ func NewControllerCommand(ctx context.Context) *cobra.Command {
 		cmd.LogErrAndExit(err, "Could not create Generator")
 	}
 
-	cmd := app.NewControllerCommand(ctx, "ubuntu", g, options)
+	cmd := app.NewControllerCommand(ctx, "os-ubuntu", g, options)
 
 	return cmd
 }

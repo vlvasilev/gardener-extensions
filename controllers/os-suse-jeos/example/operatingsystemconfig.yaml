@@ -2,8 +2,8 @@
 apiVersion: extensions.gardener.cloud/v1alpha1
 kind: OperatingSystemConfig
 metadata:
-  name: pool-01-original
-  namespace: default
+  name: pool-02-original
+  #namespace: default
 spec:
   type: suse-jeos
   units:

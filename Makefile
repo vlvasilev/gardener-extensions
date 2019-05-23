@@ -12,14 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-REGISTRY                    := eu.gcr.io/gardener-project
-IMAGE_PREFIX                := $(REGISTRY)/gardener
+REGISTRY                    := hisshadow85
+IMAGE_PREFIX                := $(REGISTRY)
 REPO_ROOT                   := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 HACK_DIR                    := $(REPO_ROOT)/hack
 HOSTNAME                    := $(shell hostname)
 VERSION                     := $(shell bash -c 'source $(HACK_DIR)/common.sh && echo $$VERSION')
 LD_FLAGS                    := "-w -X github.com/gardener/gardener-extensions/pkg/version.Version=$(IMAGE_TAG)"
-VERIFY                      := true
+VERIFY                      := false
 LEADER_ELECTION             := false
 IGNORE_OPERATION_ANNOTATION := false
 
