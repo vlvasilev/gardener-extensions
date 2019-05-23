@@ -3,7 +3,7 @@ apiVersion: extensions.gardener.cloud/v1alpha1
 kind: OperatingSystemConfig
 metadata:
   name: pool-01-original
-  namespace: default
+  # namespace: default
 spec:
   type: ubuntu
   units:
