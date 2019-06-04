@@ -1,4 +1,6 @@
 #cloud-config
+apt_update: true
+packages: ['docker.io']
 write_files:
 {{ range $_, $file := .Files -}}
 - path: '{{ $file.Path }}'
