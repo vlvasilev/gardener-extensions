@@ -9,7 +9,7 @@ RUN ./hack/install-requirements.sh
 #############      builder                                  #############
 FROM builder-base AS builder
 
-ARG VERIFY=true
+ARG VERIFY=false
 
 WORKDIR /go/src/github.com/gardener/gardener-extensions
 COPY . .

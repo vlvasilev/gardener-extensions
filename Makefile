@@ -19,7 +19,7 @@ HACK_DIR                    := $(REPO_ROOT)/hack
 HOSTNAME                    := $(shell hostname)
 VERSION                     := $(shell bash -c 'source $(HACK_DIR)/common.sh && echo $$VERSION')
 LD_FLAGS                    := "-w -X github.com/gardener/gardener-extensions/pkg/version.Version=$(IMAGE_TAG)"
-VERIFY                      := true
+VERIFY                      := false
 LEADER_ELECTION             := false
 IGNORE_OPERATION_ANNOTATION	:= true
 
@@ -65,7 +65,8 @@ install:
 ifeq ($(VERIFY),true)
 all: verify generate install
 else
-all: generate install
+all: install
+# all: generate install
 endif
 
 ### Docker commands
