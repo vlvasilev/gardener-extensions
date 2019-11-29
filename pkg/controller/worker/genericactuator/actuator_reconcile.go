@@ -16,12 +16,13 @@ package genericactuator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/gardener/gardener-extensions/pkg/controller"
 	extensionscontroller "github.com/gardener/gardener-extensions/pkg/controller"
-	"github.com/gardener/gardener-extensions/pkg/controller/worker"
+	workercontroller "github.com/gardener/gardener-extensions/pkg/controller/worker"
 	"github.com/gardener/gardener-extensions/pkg/util"
 
 	v1alpha1constants "github.com/gardener/gardener/pkg/apis/core/v1alpha1/constants"
@@ -82,6 +83,22 @@ func (a *genericActuator) Reconcile(ctx context.Context, worker *extensionsv1alp
 		return err
 	}
 
+	// Get the list of all existing machine deployments.
+	existingMachineDeployments := &machinev1alpha1.MachineDeploymentList{}
+	if err := a.client.List(ctx, existingMachineDeployments, client.InNamespace(worker.Namespace)); err != nil {
+		return err
+	}
+
+	err = a.addStateToMachineDeployment(ctx, worker, wantedMachineDeployments)
+	if err != nil {
+		return err
+	}
+
+	err = a.restore(ctx, cluster, worker, existingMachineDeployments, wantedMachineDeployments)
+	if err != nil {
+		return err
+	}
+
 	// During the time a rolling update happens we do not want the cluster autoscaler to interfer, hence it
 	// is removed for now.
 	var (
@@ -127,12 +144,6 @@ func (a *genericActuator) Reconcile(ctx context.Context, worker *extensionsv1alp
 	}
 	if err := a.updateWorkerStatusMachineImages(ctx, worker, machineImages); err != nil {
 		return errors.Wrapf(err, "failed to update the machine images in worker status")
-	}
-
-	// Get the list of all existing machine deployments.
-	existingMachineDeployments := &machinev1alpha1.MachineDeploymentList{}
-	if err := a.client.List(ctx, existingMachineDeployments, client.InNamespace(worker.Namespace)); err != nil {
-		return err
 	}
 
 	// Generate machine deployment configuration based on previously computed list of deployments and deploy them.
@@ -192,10 +203,86 @@ func (a *genericActuator) Reconcile(ctx context.Context, worker *extensionsv1alp
 		return errors.Wrapf(err, "failed to update the machine deployments in worker status")
 	}
 
+	if err := a.updateWorkerState(ctx, worker); err != nil {
+		return errors.Wrapf(err, "failed to update the state in worker status")
+	}
+
 	return nil
 }
 
-func (a *genericActuator) deployMachineDeployments(ctx context.Context, cluster *controller.Cluster, worker *extensionsv1alpha1.Worker, existingMachineDeployments *machinev1alpha1.MachineDeploymentList, wantedMachineDeployments worker.MachineDeployments, classKind string, clusterAutoscalerUsed bool) error {
+func (a *genericActuator) addStateToMachineDeployment(ctx context.Context, worker *extensionsv1alpha1.Worker, wantedMachineDeployments workercontroller.MachineDeployments) error {
+	workerCopy := worker.DeepCopy()
+
+	if workerCopy.Status.State == nil || len(workerCopy.Status.State.Raw) <= 0 {
+		fmt.Println("No STATE found!")
+		return nil
+	}
+	workerState := make(map[string]*workercontroller.MachineDeploymentState)
+
+	if err := json.Unmarshal(workerCopy.Status.State.Raw, &workerState); err != nil {
+		fmt.Println("Can't unmarshal STATE!")
+		return err
+	}
+
+	for index, wantedMachineDeployment := range wantedMachineDeployments {
+		fmt.Printf("ADD TO DEPLOYMENT: %s ... %v\n", wantedMachineDeployment.Name, workerState[wantedMachineDeployment.Name])
+		wantedMachineDeployments[index].State = workerState[wantedMachineDeployment.Name]
+	}
+	return nil
+}
+
+func (a *genericActuator) restore(ctx context.Context, cluster *controller.Cluster, worker *extensionsv1alpha1.Worker, existingMachineDeployments *machinev1alpha1.MachineDeploymentList, wantedMachineDeployments workercontroller.MachineDeployments) error {
+	existingMachineDeploymentNameSet := make(map[string]bool)
+
+	for _, existingMachineDeployment := range existingMachineDeployments.Items {
+		existingMachineDeploymentNameSet[existingMachineDeployment.Name] = true
+	}
+
+	for _, wantedMachineDeployment := range wantedMachineDeployments {
+
+		// We restore machineSet and machines only for missing machineDeployments
+		if existingMachineDeploymentNameSet[wantedMachineDeployment.Name] || wantedMachineDeployment.State == nil {
+			continue
+		}
+
+		if wantedMachineDeployment.State.MachineSet == nil {
+			continue
+		}
+
+		machineSet := &machinev1alpha1.MachineSet{}
+		if _, _, err := a.decoder.Decode(wantedMachineDeployment.State.MachineSet.Raw, nil, machineSet); err != nil {
+			return err
+		}
+
+		if err := a.client.Create(ctx, machineSet); err != nil && !apierrors.IsAlreadyExists(err) {
+			return err
+		}
+
+		if err := a.client.Status().Update(ctx, machineSet); err != nil {
+			return err
+		}
+
+		for _, rawMachine := range wantedMachineDeployment.State.Machines {
+			if rawMachine.Raw == nil {
+				continue
+			}
+			machine := &machinev1alpha1.Machine{}
+			if _, _, err := a.decoder.Decode(rawMachine.Raw, nil, machine); err != nil {
+				return err
+			}
+			if err := a.client.Create(ctx, machine); err != nil && !apierrors.IsAlreadyExists(err) {
+				return err
+			}
+			if err := a.client.Status().Update(ctx, machine); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (a *genericActuator) deployMachineDeployments(ctx context.Context, cluster *controller.Cluster, worker *extensionsv1alpha1.Worker, existingMachineDeployments *machinev1alpha1.MachineDeploymentList, wantedMachineDeployments workercontroller.MachineDeployments, classKind string, clusterAutoscalerUsed bool) error {
 	for _, deployment := range wantedMachineDeployments {
 		var (
 			labels                    = map[string]string{"name": deployment.Name}
@@ -212,9 +299,15 @@ func (a *genericActuator) deployMachineDeployments(ctx context.Context, cluster 
 		case !clusterAutoscalerUsed:
 			replicas = deployment.Minimum
 		// If the machine deployment does not yet exist we set replicas to min so that the cluster
-		// autoscaler can scale them as required.
+		// autoscaler can scale them as required. But if the machine deployment has some state records
+		// it means that we aither have controll plane migration or someone  intentionally has deleted
+		// the machine deployment
 		case existingMachineDeployment == nil:
-			replicas = deployment.Minimum
+			if deployment.State == nil {
+				replicas = deployment.Minimum
+			} else {
+				replicas = len(deployment.State.Machines)
+			}
 		// If the Shoot was hibernated and is now woken up we set replicas to min so that the cluster
 		// autoscaler can scale them as required.
 		case shootIsAwake(controller.IsHibernated(cluster), existingMachineDeployments):
@@ -291,7 +384,7 @@ func (a *genericActuator) deployMachineDeployments(ctx context.Context, cluster 
 
 // waitUntilMachineDeploymentsAvailable waits for a maximum of 30 minutes until all the desired <machineDeployments>
 // were marked as healthy/available by the machine-controller-manager. It polls the status every 5 seconds.
-func (a *genericActuator) waitUntilMachineDeploymentsAvailable(ctx context.Context, cluster *controller.Cluster, worker *extensionsv1alpha1.Worker, wantedMachineDeployments worker.MachineDeployments) error {
+func (a *genericActuator) waitUntilMachineDeploymentsAvailable(ctx context.Context, cluster *controller.Cluster, worker *extensionsv1alpha1.Worker, wantedMachineDeployments workercontroller.MachineDeployments) error {
 	return wait.PollUntil(5*time.Second, func() (bool, error) {
 		var numHealthyDeployments, numUpdated, numDesired, numberOfAwakeMachines int32
 
@@ -346,9 +439,10 @@ func (a *genericActuator) waitUntilMachineDeploymentsAvailable(ctx context.Conte
 	}, ctx.Done())
 }
 
-func (a *genericActuator) updateWorkerStatusMachineDeployments(ctx context.Context, worker *extensionsv1alpha1.Worker, machineDeployments worker.MachineDeployments) error {
+func (a *genericActuator) updateWorkerStatusMachineDeployments(ctx context.Context, worker *extensionsv1alpha1.Worker, machineDeployments workercontroller.MachineDeployments) error {
 	var statusMachineDeployments []extensionsv1alpha1.MachineDeployment
 
+	a.logger.V(4).Info("")
 	for _, machineDeployment := range machineDeployments {
 		statusMachineDeployments = append(statusMachineDeployments, extensionsv1alpha1.MachineDeployment{
 			Name:    machineDeployment.Name,
@@ -372,6 +466,112 @@ func (a *genericActuator) updateWorkerStatusMachineImages(ctx context.Context, w
 		worker.Status.ProviderStatus = &runtime.RawExtension{Object: machineImages}
 		return nil
 	})
+}
+
+func (a *genericActuator) updateWorkerState(ctx context.Context, worker *extensionsv1alpha1.Worker) error {
+	state, err := a.getWorkerState(ctx, worker)
+	if err != nil {
+		return err
+	}
+
+	err = extensionscontroller.TryUpdateStatus(ctx, retry.DefaultBackoff, a.client, worker, func() error {
+		worker.Status.State = &runtime.RawExtension{Raw: state}
+		return nil
+	})
+
+	if err != nil {
+		fmt.Printf("***************EBALO SI E MAMATA*********************************:%v\n", err)
+	}
+	return err
+}
+
+func (a *genericActuator) getWorkerState(ctx context.Context, worker *extensionsv1alpha1.Worker) ([]byte, error) {
+	existingMachineDeployments := &machinev1alpha1.MachineDeploymentList{}
+	if err := a.client.List(ctx, existingMachineDeployments, client.InNamespace(worker.Namespace)); err != nil {
+		return nil, err
+	}
+
+	var machineDeploymentNames []string
+	for _, machineDeployment := range existingMachineDeployments.Items {
+		machineDeploymentNames = append(machineDeploymentNames, machineDeployment.Name)
+		fmt.Printf("Find Deployment %s\n", machineDeployment.Name)
+	}
+
+	existingMachineSets := &machinev1alpha1.MachineSetList{}
+	if err := a.client.List(ctx, existingMachineSets, client.InNamespace(worker.Namespace)); err != nil {
+		return nil, err
+	}
+
+	machineSets := make(map[string]*machinev1alpha1.MachineSet)
+	for index, machineSet := range existingMachineSets.Items {
+		for _, referant := range machineSet.OwnerReferences {
+			if referant.Kind == "MachineDeployment" {
+				machineSets[referant.Name] = &existingMachineSets.Items[index]
+				fmt.Printf("Find Set %s\n", machineSet.Name)
+			}
+		}
+	}
+
+	existingMachines := &machinev1alpha1.MachineList{}
+	if err := a.client.List(ctx, existingMachines, client.InNamespace(worker.Namespace)); err != nil {
+		return nil, err
+	}
+
+	machines := make(map[string][]*machinev1alpha1.Machine)
+	for index, machine := range existingMachines.Items {
+		for _, referant := range machine.OwnerReferences {
+			if referant.Kind == "MachineSet" {
+				fmt.Printf("Found machine %q and added to machineset %q\n", machine.Name, referant.Name)
+				machines[referant.Name] = append(machines[referant.Name], &existingMachines.Items[index])
+			}
+		}
+	}
+
+	workerState := make(map[string]*workercontroller.MachineDeploymentState)
+	for _, deploymentName := range machineDeploymentNames {
+		machineDeploymentState := &workercontroller.MachineDeploymentState{}
+
+		machineSet := machineSets[deploymentName]
+		if machineSet == nil {
+			fmt.Printf("Could not find MachineSet for Deployment %s\n", deploymentName)
+			continue
+		}
+
+		//remove redundant data from the machine set
+		machineSet.ObjectMeta = metav1.ObjectMeta{
+			Name:        machineSet.Name,
+			Namespace:   machineSet.Namespace,
+			Annotations: machineSet.Annotations,
+			Labels:      machineSet.Labels,
+		}
+		machineSet.OwnerReferences = nil
+
+		machineDeploymentState.MachineSet = &runtime.RawExtension{Object: machineSet}
+
+		currentMachines := machines[machineSet.Name]
+		if len(currentMachines) <= 0 {
+			fmt.Printf("Could not find Machine for MachineSet %s\n", machineSet.Name)
+			continue
+		}
+
+		for _, machine := range currentMachines {
+			//remove redundant data from the machine
+			machine.ObjectMeta = metav1.ObjectMeta{
+				Name:        machine.Name,
+				Namespace:   machine.Namespace,
+				Annotations: machine.Annotations,
+				Labels:      machine.Labels,
+			}
+			machine.OwnerReferences = nil
+
+			machineDeploymentState.Machines = append(machineDeploymentState.Machines, runtime.RawExtension{Object: machine})
+		}
+
+		workerState[deploymentName] = machineDeploymentState
+		fmt.Printf("Add a Deploymnet to the worker state\n")
+	}
+
+	return json.Marshal(workerState)
 }
 
 // Helper functions
