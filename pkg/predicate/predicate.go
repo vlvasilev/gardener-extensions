@@ -213,3 +213,80 @@ func AddTypePredicate(extensionType string, predicates []predicate.Predicate) []
 	preds = append(preds, HasType(extensionType))
 	return append(preds, predicates...)
 }
+
+// StatusHasChanged is a predicate for unsuccessful last operations for creation events.
+func StatusHasChanged() predicate.Predicate {
+	statusHasChanged := func(oldObj runtime.Object, newObj runtime.Object) bool {
+		oldAcc, err := extensions.Accessor(oldObj)
+		if err != nil {
+			return false
+		}
+		newAcc, err := extensions.Accessor(newObj)
+		if err != nil {
+			return false
+		}
+
+		oldStatus := oldAcc.GetExtensionStatus()
+		newStatus := newAcc.GetExtensionStatus()
+
+		// Check conditions
+		oldConditions := oldStatus.GetConditions()
+		newConditions := newStatus.GetConditions()
+
+		if len(oldConditions) != len(newConditions) {
+			return true
+		}
+
+		oldConditionsMap := make(map[gardencorev1alpha1.ConditionType]*gardencorev1alpha1.Condition, len(oldConditions))
+		for conditionIndex, condition := range oldConditions {
+			oldConditionsMap[condition.Type] = &oldConditions[conditionIndex]
+		}
+		for _, newCondition := range newConditions {
+			oldCondition, ok := oldConditionsMap[newCondition.Type]
+			if !ok {
+				return true
+			}
+			if oldCondition.Status != newCondition.Status ||
+				oldCondition.Reason != newCondition.Reason ||
+				oldCondition.Message != newCondition.Message ||
+				!oldCondition.LastTransitionTime.Equal(&newCondition.LastTransitionTime) ||
+				!oldCondition.LastUpdateTime.Equal(&newCondition.LastUpdateTime) {
+				return true
+			}
+
+		}
+
+		// Check LastOperation
+		oldLastOperation := oldStatus.GetLastOperation()
+		newLastOperation := newStatus.GetLastOperation()
+
+		oldLastOperationUpdateTime := oldLastOperation.GetLastUpdateTime()
+		newLastOperationUpdateTime := newLastOperation.GetLastUpdateTime()
+
+		if oldLastOperation.GetDescription() != newLastOperation.GetDescription() ||
+			oldLastOperation.GetProgress() != newLastOperation.GetProgress() ||
+			oldLastOperation.GetState() != newLastOperation.GetState() ||
+			oldLastOperation.GetType() != newLastOperation.GetType() ||
+			!oldLastOperationUpdateTime.Equal(&newLastOperationUpdateTime) {
+			return true
+		}
+
+		return oldStatus.GetObservedGeneration() != newStatus.GetObservedGeneration() ||
+			oldStatus.GetLastError() != newStatus.GetLastError()
+	}
+
+	return predicate.Funcs{
+		CreateFunc: func(event event.CreateEvent) bool {
+			return true
+		},
+		UpdateFunc: func(event event.UpdateEvent) bool {
+			return statusHasChanged(event.ObjectOld, event.ObjectNew)
+		},
+		GenericFunc: func(event event.GenericEvent) bool {
+			return false
+		},
+		DeleteFunc: func(event event.DeleteEvent) bool {
+			return true
+		},
+	}
+}

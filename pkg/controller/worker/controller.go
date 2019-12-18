@@ -19,8 +19,10 @@ import (
 	extensionspredicate "github.com/gardener/gardener-extensions/pkg/predicate"
 
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
+	"github.com/gardener/gardener-extensions/pkg/controller/worker/genericstateactuator"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/source"
@@ -75,7 +77,10 @@ func DefaultPredicates(ignoreOperationAnnotation bool) []predicate.Predicate {
 func Add(mgr manager.Manager, args AddArgs) error {
 	args.ControllerOptions.Reconciler = NewReconciler(mgr, args.Actuator)
 	predicates := extensionspredicate.AddTypePredicate(args.Type, args.Predicates)
-	return add(mgr, args.ControllerOptions, predicates)
+	if err := add(mgr, args.ControllerOptions, predicates); err != nil {
+		return err
+	}
+	return nil
 }
 
 // add adds a new Controller to mgr with r as the reconcile.Reconciler
@@ -92,4 +97,36 @@ func add(mgr manager.Manager, options controller.Options, predicates []predicate
 	return ctrl.Watch(&source.Kind{Type: &extensionsv1alpha1.Cluster{}}, &extensionshandler.EnqueueRequestsFromMapFunc{
 		ToRequests: extensionshandler.SimpleMapper(ClusterToWorkerMapper(predicates), extensionshandler.UpdateWithNew),
 	})
+}
+
+func getDefaultGenericStateReconciler(mgr manager.Manager, args AddArgs) reconcile.Reconciler{
+	stateActuator := NewStateActuator(log.Log.WithName("worker-state-actuator"))
+	return NewStateReconciler(mgr, stateActuator)
+}
+
+func getDefaultStateUpdateControllerOptions() controller.Options{
+	return controller.Options{
+		MaxConcurrentReconciles: args.ControllerOptions.MaxConcurrentReconciles,
+		Reconciler:              stateReconciler,
+	}
+}
+func getDefaultPridicatesForStateUpdate(ignoreOperationAnnotation bool) {
+	if ignoreOperationAnnotation {
+		return []predicate.Predicate{
+			extensionspredicate.GenerationChanged(),
+		}
+	}
+	
+	predicates = []predicate.Predicate{
+		extensionspredicate.Or(
+			extensionspredicate.HasOperationAnnotation(),
+			extensionspredicate.LastOperationNotSuccessful(),
+			extensionspredicate.IsDeleting(),
+		),
+		extensionspredicate.ShootNotFailed(),
+		extensionspredicate.Or(
+			extensionspredicate.HasOperationAnnotation(),
+			extensionspredicate.GenerationChanged(),
+		),
+	}
 }

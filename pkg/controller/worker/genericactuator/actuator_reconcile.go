@@ -479,9 +479,6 @@ func (a *genericActuator) updateWorkerState(ctx context.Context, worker *extensi
 		return nil
 	})
 
-	if err != nil {
-		fmt.Printf("***************EBALO SI E MAMATA*********************************:%v\n", err)
-	}
 	return err
 }
 
