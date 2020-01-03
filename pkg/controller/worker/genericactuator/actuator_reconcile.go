@@ -203,9 +203,9 @@ func (a *genericActuator) Reconcile(ctx context.Context, worker *extensionsv1alp
 		return errors.Wrapf(err, "failed to update the machine deployments in worker status")
 	}
 
-	if err := a.updateWorkerState(ctx, worker); err != nil {
-		return errors.Wrapf(err, "failed to update the state in worker status")
-	}
+	// if err := a.updateWorkerState(ctx, worker); err != nil {
+	// 	return errors.Wrapf(err, "failed to update the state in worker status")
+	// }
 
 	return nil
 }
@@ -214,18 +214,15 @@ func (a *genericActuator) addStateToMachineDeployment(ctx context.Context, worke
 	workerCopy := worker.DeepCopy()
 
 	if workerCopy.Status.State == nil || len(workerCopy.Status.State.Raw) <= 0 {
-		fmt.Println("No STATE found!")
 		return nil
 	}
 	workerState := make(map[string]*workercontroller.MachineDeploymentState)
 
 	if err := json.Unmarshal(workerCopy.Status.State.Raw, &workerState); err != nil {
-		fmt.Println("Can't unmarshal STATE!")
 		return err
 	}
 
 	for index, wantedMachineDeployment := range wantedMachineDeployments {
-		fmt.Printf("ADD TO DEPLOYMENT: %s ... %v\n", wantedMachineDeployment.Name, workerState[wantedMachineDeployment.Name])
 		wantedMachineDeployments[index].State = workerState[wantedMachineDeployment.Name]
 	}
 	return nil
@@ -468,108 +465,102 @@ func (a *genericActuator) updateWorkerStatusMachineImages(ctx context.Context, w
 	})
 }
 
-func (a *genericActuator) updateWorkerState(ctx context.Context, worker *extensionsv1alpha1.Worker) error {
-	state, err := a.getWorkerState(ctx, worker)
-	if err != nil {
-		return err
-	}
+// func (a *genericActuator) updateWorkerState(ctx context.Context, worker *extensionsv1alpha1.Worker) error {
+// 	state, err := a.getWorkerState(ctx, worker)
+// 	if err != nil {
+// 		return err
+// 	}
 
-	err = extensionscontroller.TryUpdateStatus(ctx, retry.DefaultBackoff, a.client, worker, func() error {
-		worker.Status.State = &runtime.RawExtension{Raw: state}
-		return nil
-	})
+// 	err = extensionscontroller.TryUpdateStatus(ctx, retry.DefaultBackoff, a.client, worker, func() error {
+// 		worker.Status.State = &runtime.RawExtension{Raw: state}
+// 		return nil
+// 	})
 
-	return err
-}
+// 	return err
+// }
 
-func (a *genericActuator) getWorkerState(ctx context.Context, worker *extensionsv1alpha1.Worker) ([]byte, error) {
-	existingMachineDeployments := &machinev1alpha1.MachineDeploymentList{}
-	if err := a.client.List(ctx, existingMachineDeployments, client.InNamespace(worker.Namespace)); err != nil {
-		return nil, err
-	}
+// func (a *genericActuator) getWorkerState(ctx context.Context, worker *extensionsv1alpha1.Worker) ([]byte, error) {
+// 	existingMachineDeployments := &machinev1alpha1.MachineDeploymentList{}
+// 	if err := a.client.List(ctx, existingMachineDeployments, client.InNamespace(worker.Namespace)); err != nil {
+// 		return nil, err
+// 	}
 
-	var machineDeploymentNames []string
-	for _, machineDeployment := range existingMachineDeployments.Items {
-		machineDeploymentNames = append(machineDeploymentNames, machineDeployment.Name)
-		fmt.Printf("Find Deployment %s\n", machineDeployment.Name)
-	}
+// 	var machineDeploymentNames []string
+// 	for _, machineDeployment := range existingMachineDeployments.Items {
+// 		machineDeploymentNames = append(machineDeploymentNames, machineDeployment.Name)
+// 	}
 
-	existingMachineSets := &machinev1alpha1.MachineSetList{}
-	if err := a.client.List(ctx, existingMachineSets, client.InNamespace(worker.Namespace)); err != nil {
-		return nil, err
-	}
+// 	existingMachineSets := &machinev1alpha1.MachineSetList{}
+// 	if err := a.client.List(ctx, existingMachineSets, client.InNamespace(worker.Namespace)); err != nil {
+// 		return nil, err
+// 	}
 
-	machineSets := make(map[string]*machinev1alpha1.MachineSet)
-	for index, machineSet := range existingMachineSets.Items {
-		for _, referant := range machineSet.OwnerReferences {
-			if referant.Kind == "MachineDeployment" {
-				machineSets[referant.Name] = &existingMachineSets.Items[index]
-				fmt.Printf("Find Set %s\n", machineSet.Name)
-			}
-		}
-	}
+// 	machineSets := make(map[string]*machinev1alpha1.MachineSet)
+// 	for index, machineSet := range existingMachineSets.Items {
+// 		for _, referant := range machineSet.OwnerReferences {
+// 			if referant.Kind == "MachineDeployment" {
+// 				machineSets[referant.Name] = &existingMachineSets.Items[index]
+// 			}
+// 		}
+// 	}
 
-	existingMachines := &machinev1alpha1.MachineList{}
-	if err := a.client.List(ctx, existingMachines, client.InNamespace(worker.Namespace)); err != nil {
-		return nil, err
-	}
+// 	existingMachines := &machinev1alpha1.MachineList{}
+// 	if err := a.client.List(ctx, existingMachines, client.InNamespace(worker.Namespace)); err != nil {
+// 		return nil, err
+// 	}
 
-	machines := make(map[string][]*machinev1alpha1.Machine)
-	for index, machine := range existingMachines.Items {
-		for _, referant := range machine.OwnerReferences {
-			if referant.Kind == "MachineSet" {
-				fmt.Printf("Found machine %q and added to machineset %q\n", machine.Name, referant.Name)
-				machines[referant.Name] = append(machines[referant.Name], &existingMachines.Items[index])
-			}
-		}
-	}
+// 	machines := make(map[string][]*machinev1alpha1.Machine)
+// 	for index, machine := range existingMachines.Items {
+// 		for _, referant := range machine.OwnerReferences {
+// 			if referant.Kind == "MachineSet" {
+// 				machines[referant.Name] = append(machines[referant.Name], &existingMachines.Items[index])
+// 			}
+// 		}
+// 	}
 
-	workerState := make(map[string]*workercontroller.MachineDeploymentState)
-	for _, deploymentName := range machineDeploymentNames {
-		machineDeploymentState := &workercontroller.MachineDeploymentState{}
+// 	workerState := make(map[string]*workercontroller.MachineDeploymentState)
+// 	for _, deploymentName := range machineDeploymentNames {
+// 		machineDeploymentState := &workercontroller.MachineDeploymentState{}
 
-		machineSet := machineSets[deploymentName]
-		if machineSet == nil {
-			fmt.Printf("Could not find MachineSet for Deployment %s\n", deploymentName)
-			continue
-		}
+// 		machineSet := machineSets[deploymentName]
+// 		if machineSet == nil {
+// 			continue
+// 		}
 
-		//remove redundant data from the machine set
-		machineSet.ObjectMeta = metav1.ObjectMeta{
-			Name:        machineSet.Name,
-			Namespace:   machineSet.Namespace,
-			Annotations: machineSet.Annotations,
-			Labels:      machineSet.Labels,
-		}
-		machineSet.OwnerReferences = nil
+// 		//remove redundant data from the machine set
+// 		machineSet.ObjectMeta = metav1.ObjectMeta{
+// 			Name:        machineSet.Name,
+// 			Namespace:   machineSet.Namespace,
+// 			Annotations: machineSet.Annotations,
+// 			Labels:      machineSet.Labels,
+// 		}
+// 		machineSet.OwnerReferences = nil
 
-		machineDeploymentState.MachineSet = &runtime.RawExtension{Object: machineSet}
+// 		machineDeploymentState.MachineSet = &runtime.RawExtension{Object: machineSet}
 
-		currentMachines := machines[machineSet.Name]
-		if len(currentMachines) <= 0 {
-			fmt.Printf("Could not find Machine for MachineSet %s\n", machineSet.Name)
-			continue
-		}
+// 		currentMachines := machines[machineSet.Name]
+// 		if len(currentMachines) <= 0 {
+// 			continue
+// 		}
 
-		for _, machine := range currentMachines {
-			//remove redundant data from the machine
-			machine.ObjectMeta = metav1.ObjectMeta{
-				Name:        machine.Name,
-				Namespace:   machine.Namespace,
-				Annotations: machine.Annotations,
-				Labels:      machine.Labels,
-			}
-			machine.OwnerReferences = nil
+// 		for _, machine := range currentMachines {
+// 			//remove redundant data from the machine
+// 			machine.ObjectMeta = metav1.ObjectMeta{
+// 				Name:        machine.Name,
+// 				Namespace:   machine.Namespace,
+// 				Annotations: machine.Annotations,
+// 				Labels:      machine.Labels,
+// 			}
+// 			machine.OwnerReferences = nil
 
-			machineDeploymentState.Machines = append(machineDeploymentState.Machines, runtime.RawExtension{Object: machine})
-		}
+// 			machineDeploymentState.Machines = append(machineDeploymentState.Machines, runtime.RawExtension{Object: machine})
+// 		}
 
-		workerState[deploymentName] = machineDeploymentState
-		fmt.Printf("Add a Deploymnet to the worker state\n")
-	}
+// 		workerState[deploymentName] = machineDeploymentState
+// 	}
 
-	return json.Marshal(workerState)
-}
+// 	return json.Masrshal(workerState)
+// }
 
 // Helper functions
 

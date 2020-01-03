@@ -17,6 +17,9 @@ package predicate
 import (
 	"errors"
 
+	machinesv1alpha1 "github.com/gardener/machine-controller-manager/pkg/apis/machine/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/gardener/gardener-extensions/pkg/controller"
 	extensionsevent "github.com/gardener/gardener-extensions/pkg/event"
 	extensionsinject "github.com/gardener/gardener-extensions/pkg/inject"
@@ -214,73 +217,190 @@ func AddTypePredicate(extensionType string, predicates []predicate.Predicate) []
 	return append(preds, predicates...)
 }
 
-// StatusHasChanged is a predicate for unsuccessful last operations for creation events.
-func StatusHasChanged() predicate.Predicate {
+// MachineStatusHasChanged is a predicate deciding wether the status of a MCM's Machine has been changed.
+func MachineStatusHasChanged() predicate.Predicate {
 	statusHasChanged := func(oldObj runtime.Object, newObj runtime.Object) bool {
-		oldAcc, err := extensions.Accessor(oldObj)
-		if err != nil {
+		oldMachine, ok := oldObj.(*machinesv1alpha1.Machine)
+		if !ok {
 			return false
 		}
-		newAcc, err := extensions.Accessor(newObj)
-		if err != nil {
+		newMachine, ok := newObj.(*machinesv1alpha1.Machine)
+		if !ok {
 			return false
 		}
+		oldStatus := oldMachine.Status
+		newStatus := newMachine.Status
 
-		oldStatus := oldAcc.GetExtensionStatus()
-		newStatus := newAcc.GetExtensionStatus()
+		//Check the Node
+		if oldStatus.Node != newStatus.Node {
+			return true
+		}
 
-		// Check conditions
-		oldConditions := oldStatus.GetConditions()
-		newConditions := newStatus.GetConditions()
+		//Check the CurrentStatus
+		oldCurrentStatus := oldStatus.CurrentStatus
+		newCurrentStatus := newStatus.CurrentStatus
+
+		if oldCurrentStatus.Phase != newCurrentStatus.Phase ||
+			oldCurrentStatus.TimeoutActive != newCurrentStatus.TimeoutActive ||
+			newCurrentStatus.LastUpdateTime.After(oldCurrentStatus.LastUpdateTime.Time) {
+			return true
+		}
+
+		//Check the LastOperation
+		oldLastOperation := oldStatus.LastOperation
+		newLastOperation := newStatus.LastOperation
+
+		if oldLastOperation.Type != newLastOperation.Type ||
+			oldLastOperation.State != newLastOperation.State ||
+			oldLastOperation.Description != oldLastOperation.Description ||
+			newLastOperation.LastUpdateTime.After(newLastOperation.LastUpdateTime.Time) {
+			return true
+		}
+
+		//Check the Conditions
+		oldConditions := oldStatus.Conditions
+		newConditions := newStatus.Conditions
 
 		if len(oldConditions) != len(newConditions) {
 			return true
 		}
 
-		oldConditionsMap := make(map[gardencorev1alpha1.ConditionType]*gardencorev1alpha1.Condition, len(oldConditions))
-		for conditionIndex, condition := range oldConditions {
-			oldConditionsMap[condition.Type] = &oldConditions[conditionIndex]
+		oldConditionsMap := make(map[corev1.NodeConditionType]*corev1.NodeCondition)
+		for index, condition := range oldConditions {
+			oldConditionsMap[condition.Type] = &oldConditions[index]
 		}
+
 		for _, newCondition := range newConditions {
 			oldCondition, ok := oldConditionsMap[newCondition.Type]
 			if !ok {
 				return true
 			}
+
 			if oldCondition.Status != newCondition.Status ||
 				oldCondition.Reason != newCondition.Reason ||
-				oldCondition.Message != newCondition.Message ||
-				!oldCondition.LastTransitionTime.Equal(&newCondition.LastTransitionTime) ||
-				!oldCondition.LastUpdateTime.Equal(&newCondition.LastUpdateTime) {
+				oldCondition.Message != newCondition.Message {
 				return true
 			}
-
 		}
+		return false
+	}
 
-		// Check LastOperation
-		oldLastOperation := oldStatus.GetLastOperation()
-		newLastOperation := newStatus.GetLastOperation()
+	return statusChanged(statusHasChanged)
+}
 
-		oldLastOperationUpdateTime := oldLastOperation.GetLastUpdateTime()
-		newLastOperationUpdateTime := newLastOperation.GetLastUpdateTime()
+// MachineSetStatusHasChanged is a predicate deciding wether the status of a MCM's MachineSet has been changed.
+func MachineSetStatusHasChanged() predicate.Predicate {
+	statusHasChanged := func(oldObj runtime.Object, newObj runtime.Object) bool {
+		oldMachineSet, ok := oldObj.(*machinesv1alpha1.MachineSet)
+		if !ok {
+			return false
+		}
+		newMachineSet, ok := newObj.(*machinesv1alpha1.MachineSet)
+		if !ok {
+			return false
+		}
+		oldStatus := oldMachineSet.Status
+		newStatus := newMachineSet.Status
 
-		if oldLastOperation.GetDescription() != newLastOperation.GetDescription() ||
-			oldLastOperation.GetProgress() != newLastOperation.GetProgress() ||
-			oldLastOperation.GetState() != newLastOperation.GetState() ||
-			oldLastOperation.GetType() != newLastOperation.GetType() ||
-			!oldLastOperationUpdateTime.Equal(&newLastOperationUpdateTime) {
+		//Check the The number of actual replicas
+		if oldStatus.Replicas != newStatus.Replicas {
 			return true
 		}
 
-		return oldStatus.GetObservedGeneration() != newStatus.GetObservedGeneration() ||
-			oldStatus.GetLastError() != newStatus.GetLastError()
-	}
+		//Check the number of pods that have labels matching the labels of the pod template of the replicaset.
+		if oldStatus.FullyLabeledReplicas != newStatus.FullyLabeledReplicas {
+			return true
+		}
 
+		//Check the number of ready replicas for this replica set.
+		if oldStatus.ReadyReplicas != newStatus.ReadyReplicas {
+			return true
+		}
+
+		//Check the number of available replicas for this replica set.
+		if oldStatus.AvailableReplicas != newStatus.AvailableReplicas {
+			return true
+		}
+
+		//Check LastOperation
+		oldLastOperation := oldStatus.LastOperation
+		newLastOperation := newStatus.LastOperation
+
+		if oldLastOperation.Type != newLastOperation.Type ||
+			oldLastOperation.State != newLastOperation.State ||
+			oldLastOperation.Description != newLastOperation.Description {
+			return true
+		}
+
+		//Check the MachineSetConditions
+		oldMachineSetConditionsMap := make(map[machinesv1alpha1.MachineSetConditionType]*machinesv1alpha1.MachineSetCondition)
+		for index, condition := range oldStatus.Conditions {
+			oldMachineSetConditionsMap[condition.Type] = &oldStatus.Conditions[index]
+		}
+
+		newConditions := newStatus.Conditions
+		if len(oldMachineSetConditionsMap) != len(newConditions) {
+			return true
+		}
+
+		for _, newCondition := range newConditions {
+			oldCondition, ok := oldMachineSetConditionsMap[newCondition.Type]
+			if !ok {
+				return true
+			}
+			if oldCondition.Status != newCondition.Status ||
+				oldCondition.Reason != newCondition.Reason ||
+				oldCondition.Message != newCondition.Reason {
+				return true
+			}
+		}
+
+		//Check MachineSummary
+		if (oldStatus.FailedMachines == nil && newStatus.FailedMachines != nil) ||
+			(oldStatus.FailedMachines != nil && newStatus.FailedMachines == nil) {
+			return true
+		}
+		if oldStatus.FailedMachines == newStatus.FailedMachines {
+			return false
+		}
+
+		oldFailedMachinesMap := make(map[string]*machinesv1alpha1.MachineSummary)
+		for index, failedMachine := range *oldStatus.FailedMachines {
+			oldFailedMachinesMap[failedMachine.Name] = &(*oldStatus.FailedMachines)[index]
+		}
+
+		newFailedMachines := *newStatus.FailedMachines
+		if len(oldFailedMachinesMap) != len(newFailedMachines) {
+			return true
+		}
+
+		for _, newFailedMachine := range newFailedMachines {
+			oldFailedMachine, ok := oldFailedMachinesMap[newFailedMachine.Name]
+			if !ok {
+				return true
+			}
+			if oldFailedMachine.ProviderID != newFailedMachine.ProviderID ||
+				oldFailedMachine.LastOperation.Type != newFailedMachine.LastOperation.Type ||
+				oldFailedMachine.LastOperation.State != newFailedMachine.LastOperation.State ||
+				oldFailedMachine.LastOperation.Description != newFailedMachine.LastOperation.Description ||
+				oldFailedMachine.OwnerRef != newFailedMachine.OwnerRef {
+				return true
+			}
+		}
+
+		return false
+	}
+	return statusChanged(statusHasChanged)
+}
+
+func statusChanged(statusHasChanged func(oldObj runtime.Object, newObj runtime.Object) bool) predicate.Predicate {
 	return predicate.Funcs{
 		CreateFunc: func(event event.CreateEvent) bool {
 			return true
 		},
 		UpdateFunc: func(event event.UpdateEvent) bool {
-			return statusHasChanged(event.ObjectOld, event.ObjectNew)
+			result := statusHasChanged(event.ObjectOld, event.ObjectNew)
+			return result
 		},
 		GenericFunc: func(event event.GenericEvent) bool {
 			return false

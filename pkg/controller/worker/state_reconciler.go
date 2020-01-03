@@ -51,7 +51,7 @@ type stateReconciler struct {
 // Worker's State resources of Gardener's `extensions.gardener.cloud` API group.
 func NewStateReconciler(mgr manager.Manager, actuator StateActuator) reconcile.Reconciler {
 	return &stateReconciler{
-		logger:   log.Log.WithName(ControllerName),
+		logger:   log.Log.WithName(StateUpdatingControllerName),
 		actuator: actuator,
 	}
 }
@@ -107,7 +107,7 @@ func (r *stateReconciler) Reconcile(request reconcile.Request) (reconcile.Result
 		return extensionscontroller.ReconcileErr(err)
 	}
 
-	msg := "Successfully update worker"
+	msg := "Successfully update worker state"
 	r.logger.Info(msg, "worker", fmt.Sprintf("%s/%s", worker.Namespace, worker.Name))
 	if err := r.updateStatusSuccess(r.ctx, worker, operationType, msg); err != nil {
 		return reconcile.Result{}, err

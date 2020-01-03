@@ -17,11 +17,8 @@ package worker
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	extensionscontroller "github.com/gardener/gardener-extensions/pkg/controller"
-	"github.com/gardener/gardener-extensions/pkg/controller/worker"
-	workercontroller "github.com/gardener/gardener-extensions/pkg/controller/worker"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
 	machinev1alpha1 "github.com/gardener/machine-controller-manager/pkg/apis/machine/v1alpha1"
 	"github.com/pkg/errors"
@@ -41,7 +38,7 @@ type genericStateActuator struct {
 
 // NewStateActuator creates a new Actuator that reconciles Worker's State subresource
 // It provides a default implementation that allows easier integration of providers.
-func NewStateActuator(logger logr.Logger) worker.StateActuator {
+func NewStateActuator(logger logr.Logger) StateActuator {
 	return &genericStateActuator{logger: logger.WithName("worker-state-actuator")}
 }
 
@@ -70,7 +67,6 @@ func (a *genericStateActuator) updateWorkerState(ctx context.Context, worker *ex
 		worker.Status.State = &runtime.RawExtension{Raw: state}
 		return nil
 	})
-
 	return err
 }
 
@@ -83,7 +79,6 @@ func (a *genericStateActuator) getWorkerState(ctx context.Context, worker *exten
 	var machineDeploymentNames []string
 	for _, machineDeployment := range existingMachineDeployments.Items {
 		machineDeploymentNames = append(machineDeploymentNames, machineDeployment.Name)
-		fmt.Printf("Find Deployment %s\n", machineDeployment.Name)
 	}
 
 	existingMachineSets := &machinev1alpha1.MachineSetList{}
@@ -96,7 +91,6 @@ func (a *genericStateActuator) getWorkerState(ctx context.Context, worker *exten
 		for _, referant := range machineSet.OwnerReferences {
 			if referant.Kind == "MachineDeployment" {
 				machineSets[referant.Name] = &existingMachineSets.Items[index]
-				fmt.Printf("Find Set %s\n", machineSet.Name)
 			}
 		}
 	}
@@ -110,19 +104,17 @@ func (a *genericStateActuator) getWorkerState(ctx context.Context, worker *exten
 	for index, machine := range existingMachines.Items {
 		for _, referant := range machine.OwnerReferences {
 			if referant.Kind == "MachineSet" {
-				fmt.Printf("Found machine %q and added to machineset %q\n", machine.Name, referant.Name)
 				machines[referant.Name] = append(machines[referant.Name], &existingMachines.Items[index])
 			}
 		}
 	}
 
-	workerState := make(map[string]*workercontroller.MachineDeploymentState)
+	workerState := make(map[string]*MachineDeploymentState)
 	for _, deploymentName := range machineDeploymentNames {
-		machineDeploymentState := &workercontroller.MachineDeploymentState{}
+		machineDeploymentState := &MachineDeploymentState{}
 
-		machineSet := machineSets[deploymentName]
-		if machineSet == nil {
-			fmt.Printf("Could not find MachineSet for Deployment %s\n", deploymentName)
+		machineSet, ok := machineSets[deploymentName]
+		if !ok {
 			continue
 		}
 
@@ -139,7 +131,6 @@ func (a *genericStateActuator) getWorkerState(ctx context.Context, worker *exten
 
 		currentMachines := machines[machineSet.Name]
 		if len(currentMachines) <= 0 {
-			fmt.Printf("Could not find Machine for MachineSet %s\n", machineSet.Name)
 			continue
 		}
 
@@ -157,7 +148,6 @@ func (a *genericStateActuator) getWorkerState(ctx context.Context, worker *exten
 		}
 
 		workerState[deploymentName] = machineDeploymentState
-		fmt.Printf("Add a Deploymnet to the worker state\n")
 	}
 
 	return json.Marshal(workerState)
