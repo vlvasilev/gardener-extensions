@@ -20,8 +20,6 @@ import (
 	"fmt"
 
 	extensionscontroller "github.com/gardener/gardener-extensions/pkg/controller"
-	"github.com/gardener/gardener-extensions/pkg/controller/worker"
-	workercontroller "github.com/gardener/gardener-extensions/pkg/controller/worker"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
 	machinev1alpha1 "github.com/gardener/machine-controller-manager/pkg/apis/machine/v1alpha1"
 	"github.com/pkg/errors"
@@ -41,7 +39,7 @@ type genericStateActuator struct {
 
 // NewStateActuator creates a new Actuator that reconciles Worker's State subresource
 // It provides a default implementation that allows easier integration of providers.
-func NewStateActuator(logger logr.Logger) worker.StateActuator {
+func NewStateActuator(logger logr.Logger) StateActuator {
 	return &genericStateActuator{logger: logger.WithName("worker-state-actuator")}
 }
 
@@ -54,6 +52,7 @@ func (a *genericStateActuator) InjectClient(client client.Client) error {
 func (a *genericStateActuator) Reconcile(ctx context.Context, worker *extensionsv1alpha1.Worker) error {
 	copyOfWorker := worker.DeepCopy()
 	if err := a.updateWorkerState(ctx, copyOfWorker); err != nil {
+		fmt.Println("failed to update the state in worker status", err)
 		return errors.Wrapf(err, "failed to update the state in worker status")
 	}
 
@@ -70,7 +69,6 @@ func (a *genericStateActuator) updateWorkerState(ctx context.Context, worker *ex
 		worker.Status.State = &runtime.RawExtension{Raw: state}
 		return nil
 	})
-
 	return err
 }
 
@@ -79,18 +77,18 @@ func (a *genericStateActuator) getWorkerState(ctx context.Context, worker *exten
 	if err := a.client.List(ctx, existingMachineDeployments, client.InNamespace(worker.Namespace)); err != nil {
 		return nil, err
 	}
-
+	fmt.Printf("Get existing deployments: %d\n", len(existingMachineDeployments.Items))
 	var machineDeploymentNames []string
 	for _, machineDeployment := range existingMachineDeployments.Items {
 		machineDeploymentNames = append(machineDeploymentNames, machineDeployment.Name)
 		fmt.Printf("Find Deployment %s\n", machineDeployment.Name)
 	}
-
+	fmt.Printf("Get existing deployments names: %d\n", len(machineDeploymentNames))
 	existingMachineSets := &machinev1alpha1.MachineSetList{}
 	if err := a.client.List(ctx, existingMachineSets, client.InNamespace(worker.Namespace)); err != nil {
 		return nil, err
 	}
-
+	fmt.Printf("Get existing mschineSets: %d\n", len(existingMachineSets.Items))
 	machineSets := make(map[string]*machinev1alpha1.MachineSet)
 	for index, machineSet := range existingMachineSets.Items {
 		for _, referant := range machineSet.OwnerReferences {
@@ -100,12 +98,12 @@ func (a *genericStateActuator) getWorkerState(ctx context.Context, worker *exten
 			}
 		}
 	}
-
+	fmt.Printf("Get existing machineSets map: %d\n", len(machineSets))
 	existingMachines := &machinev1alpha1.MachineList{}
 	if err := a.client.List(ctx, existingMachines, client.InNamespace(worker.Namespace)); err != nil {
 		return nil, err
 	}
-
+	fmt.Printf("Get existing mschines: %d\n", len(existingMachines.Items))
 	machines := make(map[string][]*machinev1alpha1.Machine)
 	for index, machine := range existingMachines.Items {
 		for _, referant := range machine.OwnerReferences {
@@ -115,10 +113,10 @@ func (a *genericStateActuator) getWorkerState(ctx context.Context, worker *exten
 			}
 		}
 	}
-
-	workerState := make(map[string]*workercontroller.MachineDeploymentState)
+	fmt.Printf("Get existing machines map: %d\n", len(machines))
+	workerState := make(map[string]*MachineDeploymentState)
 	for _, deploymentName := range machineDeploymentNames {
-		machineDeploymentState := &workercontroller.MachineDeploymentState{}
+		machineDeploymentState := &MachineDeploymentState{}
 
 		machineSet := machineSets[deploymentName]
 		if machineSet == nil {

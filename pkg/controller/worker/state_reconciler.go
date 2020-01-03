@@ -51,7 +51,7 @@ type stateReconciler struct {
 // Worker's State resources of Gardener's `extensions.gardener.cloud` API group.
 func NewStateReconciler(mgr manager.Manager, actuator StateActuator) reconcile.Reconciler {
 	return &stateReconciler{
-		logger:   log.Log.WithName(ControllerName),
+		logger:   log.Log.WithName(StateUpdatingControllerName),
 		actuator: actuator,
 	}
 }
@@ -82,9 +82,10 @@ func (r *stateReconciler) Reconcile(request reconcile.Request) (reconcile.Result
 	// Deletion flow
 	if worker.DeletionTimestamp != nil {
 		//Nothing to do
+		fmt.Printf("Deleting a Worker. Nothing to do.\n")
 		return reconcile.Result{}, nil
 	}
-
+	fmt.Println("Reconcile flow")
 	// Reconcile flow
 	if err := controller.EnsureFinalizer(r.ctx, r.client, FinalizerName, worker); err != nil {
 		return reconcile.Result{}, err
@@ -92,22 +93,26 @@ func (r *stateReconciler) Reconcile(request reconcile.Request) (reconcile.Result
 
 	operationType := gardencorev1alpha1helper.ComputeOperationType(worker.ObjectMeta, worker.Status.LastOperation)
 	if operationType == gardencorev1alpha1.LastOperationTypeCreate {
+		fmt.Println("State is Created. We leave the reconcilation for later.")
 		//Something which is not created does not need state update for the moment so we leave it for later
 		return reconcile.Result{Requeue: true}, nil
 	}
 
+	fmt.Println("Set Proccessing State with description Updateting the worker state")
 	if err := r.updateStatusProcessing(r.ctx, worker, operationType, "Updateting the worker state"); err != nil {
 		return reconcile.Result{}, err
 	}
 
 	if err := r.actuator.Reconcile(r.ctx, worker); err != nil {
 		msg := "Error updateting worker state"
+		fmt.Println(msg, err.Error())
 		utilruntime.HandleError(r.updateStatusError(r.ctx, extensionscontroller.ReconcileErrCauseOrErr(err), worker, operationType, msg))
 		r.logger.Error(err, msg, "worker", fmt.Sprintf("%s/%s", worker.Namespace, worker.Name))
 		return extensionscontroller.ReconcileErr(err)
 	}
 
 	msg := "Successfully update worker"
+	fmt.Println(msg)
 	r.logger.Info(msg, "worker", fmt.Sprintf("%s/%s", worker.Namespace, worker.Name))
 	if err := r.updateStatusSuccess(r.ctx, worker, operationType, msg); err != nil {
 		return reconcile.Result{}, err

@@ -214,18 +214,15 @@ func (a *genericActuator) addStateToMachineDeployment(ctx context.Context, worke
 	workerCopy := worker.DeepCopy()
 
 	if workerCopy.Status.State == nil || len(workerCopy.Status.State.Raw) <= 0 {
-		fmt.Println("No STATE found!")
 		return nil
 	}
 	workerState := make(map[string]*workercontroller.MachineDeploymentState)
 
 	if err := json.Unmarshal(workerCopy.Status.State.Raw, &workerState); err != nil {
-		fmt.Println("Can't unmarshal STATE!")
 		return err
 	}
 
 	for index, wantedMachineDeployment := range wantedMachineDeployments {
-		fmt.Printf("ADD TO DEPLOYMENT: %s ... %v\n", wantedMachineDeployment.Name, workerState[wantedMachineDeployment.Name])
 		wantedMachineDeployments[index].State = workerState[wantedMachineDeployment.Name]
 	}
 	return nil
@@ -491,7 +488,6 @@ func (a *genericActuator) getWorkerState(ctx context.Context, worker *extensions
 	var machineDeploymentNames []string
 	for _, machineDeployment := range existingMachineDeployments.Items {
 		machineDeploymentNames = append(machineDeploymentNames, machineDeployment.Name)
-		fmt.Printf("Find Deployment %s\n", machineDeployment.Name)
 	}
 
 	existingMachineSets := &machinev1alpha1.MachineSetList{}
@@ -504,7 +500,6 @@ func (a *genericActuator) getWorkerState(ctx context.Context, worker *extensions
 		for _, referant := range machineSet.OwnerReferences {
 			if referant.Kind == "MachineDeployment" {
 				machineSets[referant.Name] = &existingMachineSets.Items[index]
-				fmt.Printf("Find Set %s\n", machineSet.Name)
 			}
 		}
 	}
@@ -518,7 +513,6 @@ func (a *genericActuator) getWorkerState(ctx context.Context, worker *extensions
 	for index, machine := range existingMachines.Items {
 		for _, referant := range machine.OwnerReferences {
 			if referant.Kind == "MachineSet" {
-				fmt.Printf("Found machine %q and added to machineset %q\n", machine.Name, referant.Name)
 				machines[referant.Name] = append(machines[referant.Name], &existingMachines.Items[index])
 			}
 		}
@@ -530,7 +524,6 @@ func (a *genericActuator) getWorkerState(ctx context.Context, worker *extensions
 
 		machineSet := machineSets[deploymentName]
 		if machineSet == nil {
-			fmt.Printf("Could not find MachineSet for Deployment %s\n", deploymentName)
 			continue
 		}
 
@@ -547,7 +540,6 @@ func (a *genericActuator) getWorkerState(ctx context.Context, worker *extensions
 
 		currentMachines := machines[machineSet.Name]
 		if len(currentMachines) <= 0 {
-			fmt.Printf("Could not find Machine for MachineSet %s\n", machineSet.Name)
 			continue
 		}
 
@@ -565,7 +557,6 @@ func (a *genericActuator) getWorkerState(ctx context.Context, worker *extensions
 		}
 
 		workerState[deploymentName] = machineDeploymentState
-		fmt.Printf("Add a Deploymnet to the worker state\n")
 	}
 
 	return json.Marshal(workerState)

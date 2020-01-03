@@ -15,6 +15,7 @@
 package handler
 
 import (
+	"fmt"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/util/workqueue"
@@ -45,11 +46,13 @@ func (e *EnqueueRequestsFromMapFunc) InjectFunc(f inject.Func) error {
 
 // Create implements EventHandler
 func (e *EnqueueRequestsFromMapFunc) Create(evt event.CreateEvent, q workqueue.RateLimitingInterface) {
+	fmt.Printf("EVENT HANDLER CREATE on object: %s/%s/%s\n", evt.Object.GetObjectKind().GroupVersionKind().Kind, evt.Meta.GetNamespace(), evt.Meta.GetName())
 	enqueueRequests(q, e.ToRequests.MapCreate(MapCreateObject{Meta: evt.Meta, Object: evt.Object}))
 }
 
 // Update implements EventHandler
 func (e *EnqueueRequestsFromMapFunc) Update(evt event.UpdateEvent, q workqueue.RateLimitingInterface) {
+	fmt.Printf("EVENT HANDLER UPDATE on object: %s/%s/%s\n", evt.ObjectOld.GetObjectKind().GroupVersionKind().Kind, evt.MetaOld.GetNamespace(), evt.MetaOld.GetName())
 	enqueueRequests(q, e.ToRequests.MapUpdate(MapUpdateObject{
 		MetaOld: evt.MetaOld, ObjectOld: evt.ObjectOld, MetaNew: evt.MetaNew, ObjectNew: evt.ObjectNew,
 	}))
@@ -57,6 +60,7 @@ func (e *EnqueueRequestsFromMapFunc) Update(evt event.UpdateEvent, q workqueue.R
 
 // Delete implements EventHandler
 func (e *EnqueueRequestsFromMapFunc) Delete(evt event.DeleteEvent, q workqueue.RateLimitingInterface) {
+	fmt.Printf("EVENT HANDLER DELETE on object: %s/%s/%s\n", evt.Object.GetObjectKind().GroupVersionKind().Kind, evt.Meta.GetNamespace(), evt.Meta.GetName())
 	enqueueRequests(q, e.ToRequests.MapDelete(MapDeleteObject{Meta: evt.Meta, Object: evt.Object}))
 }
 
