@@ -125,6 +125,7 @@ func (a *genericStateActuator) getWorkerState(ctx context.Context, worker *exten
 			Labels:      machineSet.Labels,
 		}
 		machineSet.OwnerReferences = nil
+		machineSet.Status = machinev1alpha1.MachineSetStatus{}
 
 		machineDeploymentState.MachineSet = &runtime.RawExtension{Object: machineSet}
 
@@ -142,6 +143,9 @@ func (a *genericStateActuator) getWorkerState(ctx context.Context, worker *exten
 				Labels:      machine.Labels,
 			}
 			machine.OwnerReferences = nil
+			machine.Status = machinev1alpha1.MachineStatus{
+				Node: machine.Status.Node,
+			}
 
 			machineDeploymentState.Machines = append(machineDeploymentState.Machines, runtime.RawExtension{Object: machine})
 		}

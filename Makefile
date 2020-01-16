@@ -57,7 +57,8 @@ install:
 ifeq ($(VERIFY),true)
 all: verify generate install
 else
-all: generate install
+all: install
+#all: generate install
 endif
 
 ### Docker commands

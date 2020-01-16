@@ -47,55 +47,65 @@ import (
 func (a *genericActuator) Reconcile(ctx context.Context, worker *extensionsv1alpha1.Worker, cluster *controller.Cluster) error {
 	workerDelegate, err := a.delegateFactory.WorkerDelegate(ctx, worker, cluster)
 	if err != nil {
+		fmt.Println("DEBUG1:", "could not instantiate actuator context")
 		return errors.Wrapf(err, "could not instantiate actuator context")
 	}
 
 	// If the shoot is hibernated then we want to scale down the machine-controller-manager. However, we want to first allow it to delete
 	// all remaining worker nodes. Hence, we cannot set the replicas=0 here (otherwise it would be offline and not able to delete the nodes).
 	var replicaFunc = func() (int32, error) {
-		if extensionscontroller.IsHibernated(cluster) {
-			deployment := &appsv1.Deployment{}
-			if err := a.client.Get(ctx, kutil.Key(worker.Namespace, a.mcmName), deployment); err != nil && !apierrors.IsNotFound(err) {
-				return 0, err
-			}
-			if replicas := deployment.Spec.Replicas; replicas != nil {
-				return *replicas, nil
-			}
-		}
-		return 1, nil
+		return 0, nil
+		// if extensionscontroller.IsHibernated(cluster) {
+		// 	deployment := &appsv1.Deployment{}
+		// 	if err := a.client.Get(ctx, kutil.Key(worker.Namespace, a.mcmName), deployment); err != nil && !apierrors.IsNotFound(err) {
+		// 		return 0, err
+		// 	}
+		// 	if replicas := deployment.Spec.Replicas; replicas != nil {
+		// 		return *replicas, nil
+		// 	}
+		// }
+		// return 1, nil
 	}
-
+	fmt.Println("DEBUG2: ", "Deploying the machine-controller-manager", "worker", fmt.Sprintf("%s/%s", worker.Namespace, worker.Name))
 	// Deploy the machine-controller-manager into the cluster.
 	a.logger.Info("Deploying the machine-controller-manager", "worker", fmt.Sprintf("%s/%s", worker.Namespace, worker.Name))
 	if err := a.deployMachineControllerManager(ctx, worker, cluster, workerDelegate, replicaFunc); err != nil {
+		fmt.Println("DEBUG3: ", err.Error())
 		return err
 	}
 
+	fmt.Println("DEBUG4: ", "Generate the desired machine deployments.")
 	// Generate the desired machine deployments.
 	wantedMachineDeployments, err := workerDelegate.GenerateMachineDeployments(ctx)
 	if err != nil {
+		fmt.Println("DEBUG5: ", err.Error(), "failed to generate the machine deployments")
 		return errors.Wrapf(err, "failed to generate the machine deployments")
 	}
 
+	fmt.Println("DEBUG6: ", "Get list of existing machine class names and list of used machine class secrets.")
 	// Get list of existing machine class names and list of used machine class secrets.
 	existingMachineClassNames, err := a.listMachineClassNames(ctx, worker.Namespace, workerDelegate.MachineClassList())
 	if err != nil {
+		fmt.Println("DEBUG7: ", err.Error())
 		return err
 	}
-
+	fmt.Println("DEBUG8: ", "Get the list of all existing machine deployments.")
 	// Get the list of all existing machine deployments.
 	existingMachineDeployments := &machinev1alpha1.MachineDeploymentList{}
 	if err := a.client.List(ctx, existingMachineDeployments, client.InNamespace(worker.Namespace)); err != nil {
+		fmt.Println("DEBUG9: ", err.Error())
 		return err
 	}
-
+	fmt.Println("DEBUG10: ", "Parse the Worker State to MachineDeployment States and attach them to the corresponding MD")
 	err = a.addStateToMachineDeployment(ctx, worker, wantedMachineDeployments)
 	if err != nil {
+		fmt.Println("DEBUG11: ", err.Error())
 		return err
 	}
-
+	fmt.Println("DEBUG12: ", "Restore the MachineSets and the Machines")
 	err = a.restore(ctx, cluster, worker, existingMachineDeployments, wantedMachineDeployments)
 	if err != nil {
+		fmt.Println("DEBUG13: ", err.Error())
 		return err
 	}
 
@@ -121,57 +131,69 @@ func (a *genericActuator) Reconcile(ctx context.Context, worker *extensionsv1alp
 			deployment := &appsv1.Deployment{}
 			if err := a.client.Get(ctx, kutil.Key(worker.Namespace, v1beta1constants.DeploymentNameClusterAutoscaler), deployment); err != nil {
 				if !apierrors.IsNotFound(err) {
+					fmt.Println("DEBUG14: ", err.Error())
 					return err
 				}
 			} else {
 				if err := util.ScaleDeployment(ctx, a.client, deployment, 0); err != nil {
+					fmt.Println("DEBUG15: ", err.Error())
 					return err
 				}
 			}
 		}
 	}
-
+	fmt.Println("DEBUG16: ", "Deploying the machine classes", "worker", fmt.Sprintf("%s/%s", worker.Namespace, worker.Name))
 	// Deploy generated machine classes.
 	a.logger.Info("Deploying the machine classes", "worker", fmt.Sprintf("%s/%s", worker.Namespace, worker.Name))
 	if err := workerDelegate.DeployMachineClasses(ctx); err != nil {
+		fmt.Println("DEBUG17", err, "failed to deploy the machine classes")
 		return errors.Wrapf(err, "failed to deploy the machine classes")
 	}
-
+	fmt.Println("DEBUG18: ", "Store machine image information in worker provider status.")
 	// Store machine image information in worker provider status.
 	machineImages, err := workerDelegate.GetMachineImages(ctx)
 	if err != nil {
+		fmt.Println("DEBUG19", err, "failed to get the machine images")
 		return errors.Wrapf(err, "failed to get the machine images")
 	}
+	fmt.Println("DEBUG20: ", "Update Worker Status Machine Images!")
 	if err := a.updateWorkerStatusMachineImages(ctx, worker, machineImages); err != nil {
+		fmt.Println("DEBUG21", err, "failed to update the machine images in worker status")
 		return errors.Wrapf(err, "failed to update the machine images in worker status")
 	}
-
+	fmt.Println("DEBUG22: ", "Deploying the machine deployments", "worker", fmt.Sprintf("%s/%s", worker.Namespace, worker.Name))
 	// Generate machine deployment configuration based on previously computed list of deployments and deploy them.
 	a.logger.Info("Deploying the machine deployments", "worker", fmt.Sprintf("%s/%s", worker.Namespace, worker.Name))
 	if err := a.deployMachineDeployments(ctx, cluster, worker, existingMachineDeployments, wantedMachineDeployments, workerDelegate.MachineClassKind(), clusterAutoscalerUsed); err != nil {
+		fmt.Println("DEBUG23: ", err, "failed to generate the machine deployment config")
 		return errors.Wrapf(err, "failed to generate the machine deployment config")
 	}
-
+	fmt.Println("DEBUG24: ", "Wait until all generated machine deployments are healthy/available.")
 	// Wait until all generated machine deployments are healthy/available.
 	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-
+	fmt.Println("DEBUG25: ", "Wait until all generated machine deployments are healthy/available.")
 	if err := a.waitUntilMachineDeploymentsAvailable(timeoutCtx, cluster, worker, wantedMachineDeployments); err != nil {
+		fmt.Println("DEBUG26: ", fmt.Sprintf("Failed while waiting for all machine deployments to be ready: '%s'", err.Error()))
 		return gardencorev1beta1helper.DetermineError(fmt.Sprintf("Failed while waiting for all machine deployments to be ready: '%s'", err.Error()))
 	}
-
+	fmt.Println("DEBUG27: ", "Delete all old machine deployments (i.e. those which were not previously computed but exist in the cluster).")
 	// Delete all old machine deployments (i.e. those which were not previously computed but exist in the cluster).
 	if err := a.cleanupMachineDeployments(ctx, existingMachineDeployments, wantedMachineDeployments); err != nil {
+		fmt.Println("DEBUG28: ", err, "failed to cleanup the machine deployments")
 		return errors.Wrapf(err, "failed to cleanup the machine deployments")
 	}
 
+	fmt.Println("DEBUG29: ", "Delete all old machine classes (i.e. those which were not previously computed but exist in the cluster).")
 	// Delete all old machine classes (i.e. those which were not previously computed but exist in the cluster).
 	if err := a.cleanupMachineClasses(ctx, worker.Namespace, workerDelegate.MachineClassList(), wantedMachineDeployments); err != nil {
+		fmt.Println("DEBUG29: ", err, "failed to cleanup the machine classes")
 		return errors.Wrapf(err, "failed to cleanup the machine classes")
 	}
-
+	fmt.Println("DEBUG30: ", "Delete all old machine class secrets (i.e. those which were not previously computed but exist in the cluster).")
 	// Delete all old machine class secrets (i.e. those which were not previously computed but exist in the cluster).
 	if err := a.cleanupMachineClassSecrets(ctx, worker.Namespace, wantedMachineDeployments); err != nil {
+		fmt.Println("DEBUG31: ", err, "failed to cleanup the orphaned machine class secrets")
 		return errors.Wrapf(err, "failed to cleanup the orphaned machine class secrets")
 	}
 
@@ -179,9 +201,11 @@ func (a *genericActuator) Reconcile(ctx context.Context, worker *extensionsv1alp
 	if controller.IsHibernated(cluster) {
 		deployment := &appsv1.Deployment{}
 		if err := a.client.Get(ctx, kutil.Key(worker.Namespace, a.mcmName), deployment); err != nil {
+			fmt.Println("DEBUG32: ", err.Error())
 			return err
 		}
 		if err := util.ScaleDeployment(ctx, a.client, deployment, 0); err != nil {
+			fmt.Println("DEBUG33: ", err.Error())
 			return err
 		}
 	}
@@ -190,19 +214,23 @@ func (a *genericActuator) Reconcile(ctx context.Context, worker *extensionsv1alp
 		deployment := &appsv1.Deployment{}
 		if err := a.client.Get(ctx, kutil.Key(worker.Namespace, v1beta1constants.DeploymentNameClusterAutoscaler), deployment); err != nil {
 			if !apierrors.IsNotFound(err) {
+				fmt.Println("DEBUG34: ", err.Error())
 				return err
 			}
 		} else {
 			if err := util.ScaleDeployment(ctx, a.client, deployment, 1); err != nil {
+				fmt.Println("DEBUG35: ", err.Error())
 				return err
 			}
 		}
 	}
 
 	if err := a.updateWorkerStatusMachineDeployments(ctx, worker, wantedMachineDeployments); err != nil {
+		fmt.Println("DEBUG36: ", err, "failed to update the machine deployments in worker status")
 		return errors.Wrapf(err, "failed to update the machine deployments in worker status")
 	}
 
+	fmt.Println("DEBUG37: ", "SUCCESSFUL RECONCILIATION!")
 	return nil
 }
 
@@ -245,12 +273,14 @@ func (a *genericActuator) restore(ctx context.Context, cluster *controller.Clust
 		}
 
 		if err := a.client.Create(ctx, machineSet); err != nil && !apierrors.IsAlreadyExists(err) {
+			fmt.Println("STORE DEBUG1: ", err)
 			return err
 		}
 
-		if err := a.client.Status().Update(ctx, machineSet); err != nil {
-			return err
-		}
+		// if err := a.client.Status().Update(ctx, machineSet); err != nil {
+		// 	fmt.Println("STORE DEBUG2: ", err)
+		// 	return err
+		// }
 
 		for _, rawMachine := range wantedMachineDeployment.State.Machines {
 			if rawMachine.Raw == nil {
@@ -263,7 +293,12 @@ func (a *genericActuator) restore(ctx context.Context, cluster *controller.Clust
 			if err := a.client.Create(ctx, machine); err != nil && !apierrors.IsAlreadyExists(err) {
 				return err
 			}
-			if err := a.client.Status().Update(ctx, machine); err != nil {
+			node := machine.Status.Node
+			if err := extensionscontroller.TryUpdateStatus(ctx, retry.DefaultBackoff, a.client, machine, func() error {
+				machine.Status.Node = node
+				return nil
+			}); err != nil {
+				fmt.Println("STORE DEBUG3: ", err)
 				return err
 			}
 		}
