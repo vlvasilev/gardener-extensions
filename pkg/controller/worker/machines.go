@@ -61,6 +61,7 @@ type MachineDeployments []MachineDeployment
 // MachineDeploymentState stores the last versions of the machine sets and machine which
 // the machine deployment corresponds
 type MachineDeploymentState struct {
+	Replicas   int32
 	MachineSet *runtime.RawExtension  `json:"machineSet,omitempty"`
 	Machines   []runtime.RawExtension `json:"machines,omitempty"`
 }

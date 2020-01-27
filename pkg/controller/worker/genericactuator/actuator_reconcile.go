@@ -217,9 +217,15 @@ func (a *genericActuator) deployMachineDeployments(ctx context.Context, cluster 
 		case !clusterAutoscalerUsed:
 			replicas = deployment.Minimum
 		// If the machine deployment does not yet exist we set replicas to min so that the cluster
-		// autoscaler can scale them as required.
+		// autoscaler can scale them as required. But if the machine deployment has some state records
+		// it means that we either have control plane migration or someone  intentionally has deleted
+		// the machine deployment
 		case existingMachineDeployment == nil:
-			replicas = deployment.Minimum
+			if deployment.State == nil {
+				replicas = deployment.Minimum
+			} else {
+				replicas = int(deployment.State.Replicas)
+			}
 		// If the Shoot was hibernated and is now woken up we set replicas to min so that the cluster
 		// autoscaler can scale them as required.
 		case shootIsAwake(controller.IsHibernated(cluster), existingMachineDeployments):

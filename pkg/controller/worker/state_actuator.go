@@ -30,6 +30,12 @@ import (
 	"github.com/go-logr/logr"
 )
 
+const (
+	machineDeploymentKind  = "MachineDeployment"
+	machineDeploymentLabel = "name"
+	machineSetKind         = "MachineSet"
+)
+
 type genericStateActuator struct {
 	logger logr.Logger
 
@@ -70,8 +76,8 @@ func (a *genericStateActuator) updateWorkerState(ctx context.Context, worker *ex
 }
 
 func (a *genericStateActuator) getWorkerState(ctx context.Context, worker *extensionsv1alpha1.Worker) ([]byte, error) {
-	machineDeploymentNames, err := a.getExistingMachineDeploymentNames(ctx, worker)
-	if err != nil {
+	existingMachineDeployments := &machinev1alpha1.MachineDeploymentList{}
+	if err := a.client.List(ctx, existingMachineDeployments, client.InNamespace(worker.Namespace)); err != nil {
 		return nil, err
 	}
 
@@ -86,16 +92,18 @@ func (a *genericStateActuator) getWorkerState(ctx context.Context, worker *exten
 	}
 
 	workerState := make(map[string]*MachineDeploymentState)
-	for _, deploymentName := range machineDeploymentNames {
+	for _, deployment := range existingMachineDeployments.Items {
 		machineDeploymentState := &MachineDeploymentState{}
 
-		machineSet, ok := machineSets[deploymentName]
+		machineDeploymentState.Replicas = deployment.Spec.Replicas
+
+		machineSet, ok := machineSets[deployment.Name]
 		if !ok {
 			continue
 		}
 		addMachineSetToMachineDeploymentState(machineSet, machineDeploymentState)
 
-		currentMachines := machines[machineSet.Name]
+		currentMachines := append(machines[machineSet.Name], machines[deployment.Name]...)
 		if len(currentMachines) <= 0 {
 			continue
 		}
@@ -104,26 +112,13 @@ func (a *genericStateActuator) getWorkerState(ctx context.Context, worker *exten
 			addMachineToMachineDeploymentState(&currentMachines[index], machineDeploymentState)
 		}
 
-		workerState[deploymentName] = machineDeploymentState
+		workerState[deployment.Name] = machineDeploymentState
 	}
 
 	return json.Marshal(workerState)
 }
 
-func (a *genericStateActuator) getExistingMachineDeploymentNames(ctx context.Context, worker *extensionsv1alpha1.Worker) ([]string, error) {
-	existingMachineDeployments := &machinev1alpha1.MachineDeploymentList{}
-	if err := a.client.List(ctx, existingMachineDeployments, client.InNamespace(worker.Namespace)); err != nil {
-		return nil, err
-	}
-
-	var machineDeploymentNames []string
-	for _, machineDeployment := range existingMachineDeployments.Items {
-		machineDeploymentNames = append(machineDeploymentNames, machineDeployment.Name)
-	}
-
-	return machineDeploymentNames, nil
-}
-
+// getExistingMachineSetsMap returns a map of existing MachineSets as values and their owners as keys
 func (a *genericStateActuator) getExistingMachineSetsMap(ctx context.Context, worker *extensionsv1alpha1.Worker) (map[string]*machinev1alpha1.MachineSet, error) {
 	existingMachineSets := &machinev1alpha1.MachineSetList{}
 	if err := a.client.List(ctx, existingMachineSets, client.InNamespace(worker.Namespace)); err != nil {
@@ -132,15 +127,25 @@ func (a *genericStateActuator) getExistingMachineSetsMap(ctx context.Context, wo
 
 	machineSets := make(map[string]*machinev1alpha1.MachineSet)
 	for index, machineSet := range existingMachineSets.Items {
-		for _, referant := range machineSet.OwnerReferences {
-			if referant.Kind == "MachineDeployment" {
-				machineSets[referant.Name] = &existingMachineSets.Items[index]
+		if len(machineSet.OwnerReferences) > 0 {
+			for _, referant := range machineSet.OwnerReferences {
+				if referant.Kind == machineDeploymentKind {
+					machineSets[referant.Name] = &existingMachineSets.Items[index]
+				}
+			}
+		} else if len(machineSet.Labels) > 0 {
+			if machineDeploymentName, ok := machineSet.Labels[machineDeploymentLabel]; ok {
+				machineSets[machineDeploymentName] = &existingMachineSets.Items[index]
 			}
 		}
 	}
 	return machineSets, nil
 }
 
+// getExistingMachinesMap returns a map of the existing Machines as values and the name of their owner
+// no matter of being machineSet or MachineDeployment. If a Machine has a ownerRefernce the key(owner)
+// will be the MachineSet if not the key will be the name of the MachineDeployment which is stored as
+// a lable. We assume that there is no MachineDeployment and MachineSet with the same names.
 func (a *genericStateActuator) getExistingMachinesMap(ctx context.Context, worker *extensionsv1alpha1.Worker) (map[string][]machinev1alpha1.Machine, error) {
 	existingMachines := &machinev1alpha1.MachineList{}
 	if err := a.client.List(ctx, existingMachines, client.InNamespace(worker.Namespace)); err != nil {
@@ -149,9 +154,15 @@ func (a *genericStateActuator) getExistingMachinesMap(ctx context.Context, worke
 
 	machines := make(map[string][]machinev1alpha1.Machine)
 	for index, machine := range existingMachines.Items {
-		for _, referant := range machine.OwnerReferences {
-			if referant.Kind == "MachineSet" {
-				machines[referant.Name] = append(machines[referant.Name], existingMachines.Items[index])
+		if len(machine.OwnerReferences) > 0 {
+			for _, referant := range machine.OwnerReferences {
+				if referant.Kind == machineSetKind {
+					machines[referant.Name] = append(machines[referant.Name], existingMachines.Items[index])
+				}
+			}
+		} else if len(machine.Labels) > 0 {
+			if machineDeploymentName, ok := machine.Labels[machineDeploymentLabel]; ok {
+				machines[machineDeploymentName] = append(machines[machineDeploymentName], existingMachines.Items[index])
 			}
 		}
 	}

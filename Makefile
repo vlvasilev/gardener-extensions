@@ -43,7 +43,8 @@ install:
 
 .PHONY: all
 ifeq ($(VERIFY),true)
-all: verify generate install
+all: install
+#all: verify generate install
 else
 all: generate install
 endif

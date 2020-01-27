@@ -108,9 +108,10 @@ func (r *stateReconciler) Reconcile(request reconcile.Request) (reconcile.Result
 
 	operationType := gardencorev1beta1helper.ComputeOperationType(worker.ObjectMeta, worker.Status.LastOperation)
 	if operationType != gardencorev1beta1.LastOperationTypeReconcile {
+		fmt.Printf("**************************FOUND OPERATION %s. RETRY!\n", string(operationType))
 		return reconcile.Result{Requeue: true}, nil
 	}
-
+	fmt.Printf("**************************FOUND OPERATION %s. CONTINUE!\n", string(operationType))
 	r.recorder.Event(worker, corev1.EventTypeNormal, StartToSyncState, "Updating the worker state")
 
 	if err := r.actuator.Reconcile(r.ctx, worker); err != nil {

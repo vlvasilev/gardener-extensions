@@ -30,6 +30,9 @@ type Actuator interface {
 	Delete(context.Context, *extensionsv1alpha1.Worker, *extensionscontroller.Cluster) error
 	// Restore read from worker.status.state field and deploy the machines and machineSet
 	Restore(context.Context, *extensionsv1alpha1.Worker, *extensionscontroller.Cluster) error
+	// Migrate delete the MCM, machineDeployments, mahicneClasees, machineClassSecrets,
+	// machineSets and the machines, then deletes the worker
+	Migrate(context.Context, *extensionsv1alpha1.Worker, *extensionscontroller.Cluster) error
 }
 
 // StateActuator acts upon Worker's State resources.
