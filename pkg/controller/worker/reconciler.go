@@ -21,8 +21,8 @@ import (
 	"github.com/gardener/gardener-extensions/pkg/controller"
 	extensionscontroller "github.com/gardener/gardener-extensions/pkg/controller"
 	"github.com/gardener/gardener-extensions/pkg/util"
-
 	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
+	v1beta1constants "github.com/gardener/gardener/pkg/apis/core/v1beta1/constants"
 	gardencorev1beta1helper "github.com/gardener/gardener/pkg/apis/core/v1beta1/helper"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
 	"github.com/go-logr/logr"
@@ -122,6 +122,29 @@ func (r *reconciler) Reconcile(request reconcile.Request) (reconcile.Result, err
 		}
 
 		return reconcile.Result{}, nil
+	}
+
+	if worker.Annotations[v1beta1constants.GardenerOperation] == v1beta1constants.GardenerOperationRestore {
+		// remove operation annotation 'restore'
+		withOpAnnotationRestore := worker.DeepCopyObject()
+		delete(worker.Annotations, v1beta1constants.GardenerOperation)
+		if err := r.client.Patch(r.ctx, worker, client.MergeFrom(withOpAnnotationRestore)); err != nil {
+			r.logger.Error(err, "Error removing annotation from Worker", "annotation", fmt.Sprintf("%s/%s", v1beta1constants.GardenerOperation, v1beta1constants.GardenerOperationRestore), "worker", fmt.Sprintf("%s/%s", worker.Namespace, worker.Name))
+			return reconcile.Result{}, err
+		}
+
+		operationType := gardencorev1beta1helper.ComputeOperationType(worker.ObjectMeta, worker.Status.LastOperation)
+		if err := r.updateStatusProcessing(r.ctx, worker, operationType, "Restoring the worker"); err != nil {
+			return reconcile.Result{}, err
+		}
+
+		if err := r.actuator.Restore(r.ctx, worker, cluster); err != nil {
+			msg := "Error restoring worker"
+			utilruntime.HandleError(r.updateStatusError(r.ctx, extensionscontroller.ReconcileErrCauseOrErr(err), worker, operationType, msg))
+			r.logger.Error(err, msg, "worker", fmt.Sprintf("%s/%s", worker.Namespace, worker.Name))
+			return extensionscontroller.ReconcileErr(err)
+		}
+
 	}
 
 	// Reconcile flow

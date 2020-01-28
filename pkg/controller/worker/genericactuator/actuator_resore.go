@@ -17,39 +17,65 @@ package genericactuator
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	extensionscontroller "github.com/gardener/gardener-extensions/pkg/controller"
 	workercontroller "github.com/gardener/gardener-extensions/pkg/controller/worker"
-	v1beta1constants "github.com/gardener/gardener/pkg/apis/core/v1beta1/constants"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
 	machinev1alpha1 "github.com/gardener/machine-controller-manager/pkg/apis/machine/v1alpha1"
+	"github.com/pkg/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func (a *genericActuator) restore(ctx context.Context, worker *extensionsv1alpha1.Worker, existingMachineDeployments *machinev1alpha1.MachineDeploymentList, wantedMachineDeployments workercontroller.MachineDeployments) error {
-
-	if worker.Annotations[v1beta1constants.GardenerOperation] != v1beta1constants.GardenerOperationRestore {
-		return nil
+func (a *genericActuator) Restore(ctx context.Context, worker *extensionsv1alpha1.Worker, cluster *extensionscontroller.Cluster) error {
+	workerDelegate, err := a.delegateFactory.WorkerDelegate(ctx, worker, cluster)
+	if err != nil {
+		return errors.Wrapf(err, "could not instantiate actuator context")
 	}
 
-	// remove operation annotation 'restore'
-	withOpAnnotationRestore := worker.DeepCopyObject()
-	delete(worker.Annotations, v1beta1constants.GardenerOperation)
-	if err := a.client.Patch(ctx, worker, client.MergeFrom(withOpAnnotationRestore)); err != nil {
+	// Generate the desired machine deployments.
+	wantedMachineDeployments, err := workerDelegate.GenerateMachineDeployments(ctx)
+	if err != nil {
+		return errors.Wrapf(err, "failed to generate the machine deployments")
+	}
+
+	// Get the list of all existing machine deployments.
+	existingMachineDeployments := &machinev1alpha1.MachineDeploymentList{}
+	if err := a.client.List(ctx, existingMachineDeployments, client.InNamespace(worker.Namespace)); err != nil {
 		return err
 	}
 
 	// Parse the worker state to a separete machineDeployment states and attach them to
 	// the corresponding machineDeployments which are to be deployed later
+	a.logger.Info("Extracting the worker status.state", "worker", fmt.Sprintf("%s/%s", worker.Namespace, worker.Name))
 	if err := a.addStateToMachineDeployment(ctx, worker, wantedMachineDeployments); err != nil {
 		return err
 	}
 
+	wantedMachineDeployments = removeWantedDeploymentWithoutState(wantedMachineDeployments)
+
+	// Delete the machine-controller-manager. During restoration MCM must not exists
+	a.logger.Info("Deploying machine-control-manager", "worker", fmt.Sprintf("%s/%s", worker.Namespace, worker.Name))
+	if err := a.deleteMachineControllerManager(ctx, worker); err != nil {
+		return errors.Wrapf(err, "failed deleting machine-controller-manager")
+	}
+
 	// Do the actual restoration
-	return a.deployMachineSetsAndMachines(ctx, worker, existingMachineDeployments, wantedMachineDeployments)
+	a.logger.Info("Deploying the machines and MacineSets", "worker", fmt.Sprintf("%s/%s", worker.Namespace, worker.Name))
+	if err := a.deployMachineSetsAndMachines(ctx, worker, wantedMachineDeployments); err != nil {
+		return errors.Wrapf(err, "failed restoration of the machineSet and the machines")
+	}
+
+	// Generate machine deployment configuration based on previously computed list of deployments and deploy them.
+	a.logger.Info("Deploying the sored in worker status.state machine deployments", "worker", fmt.Sprintf("%s/%s", worker.Namespace, worker.Name))
+	if err := a.deployMachineDeployments(ctx, cluster, worker, existingMachineDeployments, wantedMachineDeployments, workerDelegate.MachineClassKind(), true); err != nil {
+		return errors.Wrapf(err, "failed to restore the machine deployment config")
+	}
+
+	return nil
 }
 
 func (a *genericActuator) addStateToMachineDeployment(ctx context.Context, worker *extensionsv1alpha1.Worker, wantedMachineDeployments workercontroller.MachineDeployments) error {
@@ -74,17 +100,9 @@ func (a *genericActuator) addStateToMachineDeployment(ctx context.Context, worke
 	return nil
 }
 
-func (a *genericActuator) deployMachineSetsAndMachines(ctx context.Context, worker *extensionsv1alpha1.Worker, existingMachineDeployments *machinev1alpha1.MachineDeploymentList, wantedMachineDeployments workercontroller.MachineDeployments) error {
-	existingMachineDeploymentNameSet := make(map[string]struct{})
-
-	for _, existingMachineDeployment := range existingMachineDeployments.Items {
-		existingMachineDeploymentNameSet[existingMachineDeployment.Name] = struct{}{}
-	}
-
+func (a *genericActuator) deployMachineSetsAndMachines(ctx context.Context, worker *extensionsv1alpha1.Worker, wantedMachineDeployments workercontroller.MachineDeployments) error {
 	for _, wantedMachineDeployment := range wantedMachineDeployments {
-		// We restore machineSets and machines only for missing machineDeployments
-		if _, ok := existingMachineDeploymentNameSet[wantedMachineDeployment.Name]; ok ||
-			wantedMachineDeployment.State == nil || wantedMachineDeployment.State.MachineSet == nil {
+		if wantedMachineDeployment.State == nil || wantedMachineDeployment.State.MachineSet == nil {
 			continue
 		}
 
@@ -141,4 +159,14 @@ func (a *genericActuator) updateStatus(ctx context.Context, obj runtime.Object, 
 		return extensionscontroller.TryUpdateStatus(ctx, retry.DefaultBackoff, a.client, obj, transform)
 	}
 	return a.client.Status().Update(ctx, obj)
+}
+
+func removeWantedDeploymentWithoutState(wantedMachineDeployments workercontroller.MachineDeployments) workercontroller.MachineDeployments {
+	var reducedMachineDeployments workercontroller.MachineDeployments
+	for _, wantedMachineDeployment := range wantedMachineDeployments {
+		if wantedMachineDeployment.State != nil {
+			reducedMachineDeployments = append(reducedMachineDeployments, wantedMachineDeployment)
+		}
+	}
+	return reducedMachineDeployments
 }

@@ -28,6 +28,8 @@ type Actuator interface {
 	Reconcile(context.Context, *extensionsv1alpha1.Worker, *extensionscontroller.Cluster) error
 	// Delete deletes the Worker.
 	Delete(context.Context, *extensionsv1alpha1.Worker, *extensionscontroller.Cluster) error
+	// Restore read from worker.status.state field and deploy the machines and machineSet
+	Restore(context.Context, *extensionsv1alpha1.Worker, *extensionscontroller.Cluster) error
 }
 
 // StateActuator acts upon Worker's State resources.
