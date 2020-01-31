@@ -16,6 +16,7 @@ package genericactuator
 
 import (
 	"context"
+	"fmt"
 
 	extensionscontroller "github.com/gardener/gardener-extensions/pkg/controller"
 	"github.com/gardener/gardener-extensions/pkg/controller/worker"
@@ -31,6 +32,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -52,6 +54,7 @@ type genericActuator struct {
 
 	client               client.Client
 	clientset            kubernetes.Interface
+	decoder              runtime.Decoder
 	gardenerClientset    gardenerkubernetes.Interface
 	chartApplier         gardenerkubernetes.ChartApplier
 	chartRendererFactory extensionscontroller.ChartRendererFactory
@@ -82,6 +85,11 @@ func (a *genericActuator) InjectClient(client client.Client) error {
 	return nil
 }
 
+func (a *genericActuator) InjectScheme(scheme *runtime.Scheme) error {
+	a.decoder = serializer.NewCodecFactory(scheme).UniversalDecoder()
+	return nil
+}
+
 func (a *genericActuator) InjectConfig(config *rest.Config) error {
 	var err error
 
@@ -108,6 +116,21 @@ func (a *genericActuator) cleanupMachineDeployments(ctx context.Context, existin
 		if !wantedMachineDeployments.HasDeployment(existingMachineDeployment.Name) {
 			if err := a.client.Delete(ctx, &existingMachineDeployment); err != nil {
 				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (a *genericActuator) shallowDeleteMachineDeployments(ctx context.Context, existingMachineDeployments *machinev1alpha1.MachineDeploymentList, wantedMachineDeployments worker.MachineDeployments) error {
+	if err := a.cleanupMachineDeployments(ctx, existingMachineDeployments, wantedMachineDeployments); err != nil {
+		return err
+	}
+
+	for _, existingMachineDeployment := range existingMachineDeployments.Items {
+		if !wantedMachineDeployments.HasDeployment(existingMachineDeployment.Name) {
+			if err := extensionscontroller.DeleteAllFinalizers(ctx, a.client, &existingMachineDeployment); err != nil {
+				return errors.Wrapf(err, "Error removing finalizer from MachineDeployment: %s/%s", existingMachineDeployment.Namespace, existingMachineDeployment.Name)
 			}
 		}
 	}
@@ -157,6 +180,30 @@ func (a *genericActuator) cleanupMachineClasses(ctx context.Context, namespace s
 	})
 }
 
+func (a *genericActuator) shallowDeleteMachineClasses(ctx context.Context, namespace string, machineClassList runtime.Object, wantedMachineDeployments worker.MachineDeployments) error {
+	if err := a.cleanupMachineClasses(ctx, namespace, machineClassList, wantedMachineDeployments); err != nil {
+		return err
+	}
+	if err := a.client.List(ctx, machineClassList, client.InNamespace(namespace)); err != nil {
+		return err
+	}
+
+	return meta.EachListItem(machineClassList, func(machineClass runtime.Object) error {
+		accessor, err := meta.Accessor(machineClass)
+		if err != nil {
+			return err
+		}
+
+		if !wantedMachineDeployments.HasClass(accessor.GetName()) {
+			if err := extensionscontroller.DeleteAllFinalizers(ctx, a.client, machineClass); err != nil {
+				return errors.Wrapf(err, "Error removing finalizer from MachineClass: %s/%s", accessor.GetNamespace(), accessor.GetName())
+			}
+		}
+
+		return nil
+	})
+}
+
 func (a *genericActuator) listMachineClassSecrets(ctx context.Context, namespace string) (*corev1.SecretList, error) {
 	var (
 		secretList = &corev1.SecretList{}
@@ -191,7 +238,29 @@ func (a *genericActuator) cleanupMachineClassSecrets(ctx context.Context, namesp
 	return nil
 }
 
-// cleanupMachineSets deletes MachineSets having number of desired and actual replicas equaling 0
+// shallowDeleteMachineClassSecrets deletes all unused machine class secrets (i.e., those which are not part
+// of the provided list <usedSecrets>) without waiting for MCM to do this.
+func (a *genericActuator) shallowDeleteMachineClassSecrets(ctx context.Context, namespace string, wantedMachineDeployments worker.MachineDeployments) error {
+	if err := a.cleanupMachineClassSecrets(ctx, namespace, wantedMachineDeployments); err != nil {
+		return err
+	}
+	secretList, err := a.listMachineClassSecrets(ctx, namespace)
+	if err != nil {
+		return err
+	}
+	// Delete the finalizers to all secrets which were used for machine classes that do not exist anymore.
+	for _, secret := range secretList.Items {
+		if !wantedMachineDeployments.HasSecret(secret.Name) {
+			if err := extensionscontroller.DeleteAllFinalizers(ctx, a.client, &secret); err != nil {
+				return errors.Wrapf(err, "Error removing finalizer from MachineClassSecret: %s/%s", secret.Namespace, secret.Name)
+			}
+		}
+	}
+
+	return nil
+}
+
+// cleanupMachineClassSecrets deletes MachineSets having number of desired and actual replicas equaling 0
 func (a *genericActuator) cleanupMachineSets(ctx context.Context, namespace string) error {
 	machineSetList := &machinev1alpha1.MachineSetList{}
 	if err := a.client.List(ctx, machineSetList, client.InNamespace(namespace)); err != nil {
@@ -207,6 +276,78 @@ func (a *genericActuator) cleanupMachineSets(ctx context.Context, namespace stri
 			if err := a.client.Delete(ctx, machineSet.DeepCopy()); client.IgnoreNotFound(err) != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+// shallowDeleteMachineSets deletes the existing machineSets in a given namespace
+// by simply deleting the finalizers.
+func (a *genericActuator) shallowDeleteAllExistingMachineSets(ctx context.Context, namespace string) error {
+	machineSetList := &machinev1alpha1.MachineSetList{}
+	if err := a.client.List(ctx, machineSetList, client.InNamespace(namespace)); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+
+	for _, machineSet := range machineSetList.Items {
+		machineSetDeepCopy := machineSet.DeepCopy()
+		if err := a.client.Delete(ctx, machineSetDeepCopy); client.IgnoreNotFound(err) != nil {
+			return err
+		}
+		if err := extensionscontroller.DeleteAllFinalizers(ctx, a.client, machineSetDeepCopy); err != nil {
+			return errors.Wrapf(err, "Error removing finalizer from MachineSet: %s/%s", machineSet.Namespace, machineSet.Name)
+		}
+	}
+	return nil
+}
+
+// shallowDeleteMachines deletes the existing machines in a given namespace
+// by simple removing the finalizers. This leads to removed machine CRDs without deleting the actual Vm's on the IaaS (shallow deletion).
+func (a *genericActuator) shallowDeleteAllExistingMachines(ctx context.Context, namespace string) error {
+	machineList := &machinev1alpha1.MachineList{}
+	if err := a.client.List(ctx, machineList, client.InNamespace(namespace)); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+
+	for _, machine := range machineList.Items {
+		machineDeepCopy := machine.DeepCopy()
+		if err := a.client.Delete(ctx, machineDeepCopy); client.IgnoreNotFound(err) != nil {
+			return err
+		}
+		if err := extensionscontroller.DeleteAllFinalizers(ctx, a.client, machineDeepCopy); err != nil {
+			return errors.Wrapf(err, "Error removing finalizer from Machine: %s/%s", machineDeepCopy.Namespace, machineDeepCopy.Name)
+		}
+	}
+	return nil
+}
+
+// shallowDeleteMachineSets deletes the existing machineSets in a given namespace
+// by simply deleting the finalizers.
+func (a *genericActuator) shallowDeleteAllObjects(ctx context.Context, namespace string, objectList runtime.Object) error {
+	if !meta.IsListType(objectList) {
+		return fmt.Errorf("object %s/%s/%s is not a List", objectList.GetObjectKind().GroupVersionKind().Group, objectList.GetObjectKind().GroupVersionKind().Version, objectList.GetObjectKind().GroupVersionKind().Kind)
+	}
+	if err := a.client.List(ctx, objectList, client.InNamespace(namespace)); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+
+	objects, _ := meta.GetItemsPtr(objectList)
+	for _, object := range *objects.(*[]runtime.Object) {
+		object := object.DeepCopyObject()
+		if err := a.client.Delete(ctx, object); client.IgnoreNotFound(err) != nil {
+			return err
+		}
+		if err := extensionscontroller.DeleteAllFinalizers(ctx, a.client, object); err != nil {
+			return err
 		}
 	}
 	return nil

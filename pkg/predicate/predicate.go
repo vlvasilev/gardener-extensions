@@ -20,6 +20,7 @@ import (
 	"github.com/gardener/gardener-extensions/pkg/controller"
 	extensionsevent "github.com/gardener/gardener-extensions/pkg/event"
 	extensionsinject "github.com/gardener/gardener-extensions/pkg/inject"
+	machinev1alpha1 "github.com/gardener/machine-controller-manager/pkg/apis/machine/v1alpha1"
 
 	"github.com/gardener/gardener/pkg/api/extensions"
 	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
@@ -158,7 +159,9 @@ func HasName(name string) predicate.Predicate {
 // HasOperationAnnotation is a predicate for the operation annotation.
 func HasOperationAnnotation() predicate.Predicate {
 	return FromMapper(MapperFunc(func(e event.GenericEvent) bool {
-		return e.Meta.GetAnnotations()[v1beta1constants.GardenerOperation] == v1beta1constants.GardenerOperationReconcile
+		return e.Meta.GetAnnotations()[v1beta1constants.GardenerOperation] == v1beta1constants.GardenerOperationReconcile ||
+			e.Meta.GetAnnotations()[v1beta1constants.GardenerOperation] == v1beta1constants.GardenerOperationRestore ||
+			e.Meta.GetAnnotations()[v1beta1constants.GardenerOperation] == v1beta1constants.GardenerOperationMigrate
 	}), CreateTrigger, UpdateNewTrigger, GenericTrigger)
 }
 
@@ -237,4 +240,40 @@ func HasPurpose(purpose extensionsv1alpha1.Purpose) predicate.Predicate {
 
 		return *controlPlane.Spec.Purpose == purpose
 	}), CreateTrigger, UpdateNewTrigger, DeleteTrigger, GenericTrigger)
+}
+
+// MachineStatusHasChanged is a predicate deciding wether the status of a MCM's Machine has been changed.
+func MachineStatusHasChanged() predicate.Predicate {
+	statusHasChanged := func(oldObj runtime.Object, newObj runtime.Object) bool {
+		oldMachine, ok := oldObj.(*machinev1alpha1.Machine)
+		if !ok {
+			return false
+		}
+		newMachine, ok := newObj.(*machinev1alpha1.Machine)
+		if !ok {
+			return false
+		}
+		oldStatus := oldMachine.Status
+		newStatus := newMachine.Status
+
+		//Check the Node
+		return oldStatus.Node != newStatus.Node
+
+	}
+
+	return predicate.Funcs{
+		CreateFunc: func(event event.CreateEvent) bool {
+			return true
+		},
+		UpdateFunc: func(event event.UpdateEvent) bool {
+			result := statusHasChanged(event.ObjectOld, event.ObjectNew)
+			return result
+		},
+		GenericFunc: func(event event.GenericEvent) bool {
+			return false
+		},
+		DeleteFunc: func(event event.DeleteEvent) bool {
+			return true
+		},
+	}
 }
