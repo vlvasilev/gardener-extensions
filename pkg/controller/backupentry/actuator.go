@@ -26,4 +26,8 @@ type Actuator interface {
 	Reconcile(context.Context, *extensionsv1alpha1.BackupEntry) error
 	// Delete deletes the BackupEntry.
 	Delete(context.Context, *extensionsv1alpha1.BackupEntry) error
+	// Migrate prepare BackupEntry for migration
+	Migrate(context.Context, *extensionsv1alpha1.BackupEntry) error
+	// Restore restore BackupEntry after migration
+	Restore(context.Context, *extensionsv1alpha1.BackupEntry) error
 }

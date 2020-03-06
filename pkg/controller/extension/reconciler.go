@@ -25,6 +25,7 @@ import (
 	"github.com/gardener/gardener-extensions/pkg/util"
 
 	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
+	gardencorev1beta1constants "github.com/gardener/gardener/pkg/apis/core/v1beta1/constants"
 	gardencorev1beta1helper "github.com/gardener/gardener/pkg/apis/core/v1beta1/helper"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
 	"github.com/go-logr/logr"
@@ -172,6 +173,10 @@ func (r *reconciler) Reconcile(request reconcile.Request) (reconcile.Result, err
 		result reconcile.Result
 		err    error
 	)
+	// At the moment migration is not need for this controller
+	if opAnnotation, ok := ex.Annotations[gardencorev1beta1constants.GardenerOperation]; ok && opAnnotation == gardencorev1beta1constants.GardenerOperationMigrate {
+		return reconcile.Result{}, extensionscontroller.RemoveAnnotation(r.ctx, r.client, ex, gardencorev1beta1constants.GardenerOperation)
+	}
 
 	if ex.DeletionTimestamp != nil {
 		return r.delete(r.ctx, ex)
@@ -201,6 +206,11 @@ func (r *reconciler) reconcile(ctx context.Context, ex *extensionsv1alpha1.Exten
 		_ = r.updateStatusError(ctx, extensionscontroller.ReconcileErrCauseOrErr(err), ex, operationType, msg)
 		r.logger.Error(err, msg, "extension", ex.Name, "namespace", ex.Namespace)
 		return extensionscontroller.ReconcileErr(err)
+	}
+
+	if err := extensionscontroller.RemoveAnnotation(r.ctx, r.client, ex, gardencorev1beta1constants.GardenerOperation); err != nil {
+		r.logger.Info("failed to remove operationAnnotation, %v", err)
+		return reconcile.Result{}, err
 	}
 
 	msg = "Successfully reconciled Extension resource"

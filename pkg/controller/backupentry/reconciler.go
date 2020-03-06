@@ -21,6 +21,7 @@ import (
 	extensionscontroller "github.com/gardener/gardener-extensions/pkg/controller"
 	"github.com/gardener/gardener-extensions/pkg/util"
 	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
+	gardencorev1beta1constants "github.com/gardener/gardener/pkg/apis/core/v1beta1/constants"
 	gardencorev1beta1helper "github.com/gardener/gardener/pkg/apis/core/v1beta1/helper"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
 	"github.com/go-logr/logr"
@@ -41,6 +42,10 @@ const (
 	EventBackupEntryReconciliation string = "BackupEntryReconciliation"
 	// EventBackupEntryDeletion an event reason to describe backup entry deletion.
 	EventBackupEntryDeletion string = "BackupEntryDeletion"
+	// EventBackupEntryMigration an event reason to describe backup entry migration.
+	EventBackupEntryMigration string = "BackupEntryMigration"
+	// EventBackupEntryRestoration an event reason to describe backup entry restoration.
+	EventBackupEntryRestoration string = "BackupEntryRestoretion"
 )
 
 type reconciler struct {
@@ -87,10 +92,20 @@ func (r *reconciler) Reconcile(request reconcile.Request) (reconcile.Result, err
 		return reconcile.Result{}, err
 	}
 
-	if be.DeletionTimestamp != nil {
+	operationType := gardencorev1beta1helper.ComputeOperationType(be.ObjectMeta, be.Status.LastOperation)
+
+	switch {
+	case extensionscontroller.IsMigrated(be):
+		return reconcile.Result{}, nil
+	case operationType == gardencorev1beta1.LastOperationTypeMigrate:
+		return r.migrate(r.ctx, be)
+	case be.DeletionTimestamp != nil:
 		return r.delete(r.ctx, be)
+	case be.Annotations[gardencorev1beta1constants.GardenerOperation] == gardencorev1beta1constants.GardenerOperationRestore:
+		return r.restore(r.ctx, be)
+	default:
+		return r.reconcile(r.ctx, be)
 	}
-	return r.reconcile(r.ctx, be)
 }
 
 func (r *reconciler) reconcile(ctx context.Context, be *extensionsv1alpha1.BackupEntry) (reconcile.Result, error) {
@@ -178,6 +193,96 @@ func (r *reconciler) delete(ctx context.Context, be *extensionsv1alpha1.BackupEn
 	r.logger.Info("Removing finalizer.", "backupentry", be.Name)
 	if err := extensionscontroller.DeleteFinalizer(ctx, r.client, FinalizerName, be); err != nil {
 		r.logger.Error(err, "Error removing finalizer from backupentry", "backupentry", be.Name)
+		return reconcile.Result{}, err
+	}
+
+	return reconcile.Result{}, nil
+}
+
+func (r *reconciler) migrate(ctx context.Context, be *extensionsv1alpha1.BackupEntry) (reconcile.Result, error) {
+	if err := r.updateStatusProcessing(ctx, be, gardencorev1beta1.LastOperationTypeMigrate, "Migrating the backupentry"); err != nil {
+		return reconcile.Result{}, err
+	}
+
+	r.logger.Info("Starting the migration of backupentry", "backupentry", be.Name)
+	r.recorder.Event(be, corev1.EventTypeNormal, EventBackupEntryMigration, "Deleting the backupentry")
+	if err := r.actuator.Migrate(r.ctx, be); err != nil {
+		msg := "Error migrating backupentry"
+		r.recorder.Eventf(be, corev1.EventTypeWarning, EventBackupEntryMigration, "%s: %+v", msg, err)
+		_ = r.updateStatusError(ctx, extensionscontroller.ReconcileErrCauseOrErr(err), be, gardencorev1beta1.LastOperationTypeMigrate, msg)
+		r.logger.Error(err, msg, "backupentry", be.Name)
+		return extensionscontroller.ReconcileErr(err)
+	}
+
+	msg := "Successfully migrate backupentry"
+	r.logger.Info(msg, "backupentry", be.Name)
+	r.recorder.Event(be, corev1.EventTypeNormal, EventBackupEntryMigration, msg)
+	if err := r.updateStatusSuccess(ctx, be, gardencorev1beta1.LastOperationTypeMigrate, msg); err != nil {
+		return reconcile.Result{}, err
+	}
+
+	secret, err := extensionscontroller.GetSecretByReference(ctx, r.client, &be.Spec.SecretRef)
+	if err != nil {
+		r.logger.Info("failed to get backup entry secret, %v", err)
+		return reconcile.Result{}, err
+	}
+	if err := extensionscontroller.DeleteAllFinalizers(ctx, r.client, secret); err != nil {
+		r.logger.Info("failed to remove finalizer on backup entry secret, %v", err)
+		return reconcile.Result{}, err
+	}
+
+	r.logger.Info("Removing finalizer.", "backupentry", be.Name)
+	if err := extensionscontroller.DeleteAllFinalizers(ctx, r.client, be); err != nil {
+		r.logger.Error(err, "Error removing the finalizers from backupentry", "backupentry", be.Name)
+		return reconcile.Result{}, err
+	}
+
+	if err := extensionscontroller.RemoveAnnotation(ctx, r.client, be, gardencorev1beta1constants.GardenerOperation); err != nil {
+		r.logger.Error(err, "Error removing annotation from backupentry", "backupentry", be.Name)
+		return reconcile.Result{}, err
+	}
+
+	return reconcile.Result{}, nil
+}
+
+func (r *reconciler) restore(ctx context.Context, be *extensionsv1alpha1.BackupEntry) (reconcile.Result, error) {
+	if err := extensionscontroller.EnsureFinalizer(ctx, r.client, FinalizerName, be); err != nil {
+		return reconcile.Result{}, err
+	}
+
+	operationType := gardencorev1beta1helper.ComputeOperationType(be.ObjectMeta, be.Status.LastOperation)
+	if err := r.updateStatusProcessing(ctx, be, operationType, "Restore the backupentry"); err != nil {
+		return reconcile.Result{}, err
+	}
+
+	secret, err := extensionscontroller.GetSecretByReference(ctx, r.client, &be.Spec.SecretRef)
+	if err != nil {
+		r.logger.Info("failed to get backup entry secret, %v", err)
+		return reconcile.Result{}, err
+	}
+	if err := extensionscontroller.EnsureFinalizer(ctx, r.client, FinalizerName, secret); err != nil {
+		r.logger.Info("failed to ensure finalizer on backup entry secret, %v", err)
+		return reconcile.Result{}, err
+	}
+
+	r.logger.Info("Starting the restoration of backupentry", "backupentry", be.Name)
+	r.recorder.Event(be, corev1.EventTypeNormal, EventBackupEntryRestoration, "Reconciling the backupentry")
+	if err := r.actuator.Restore(ctx, be); err != nil {
+		msg := "Error restore backupentry"
+		_ = r.updateStatusError(ctx, extensionscontroller.ReconcileErrCauseOrErr(err), be, operationType, msg)
+		r.logger.Error(err, msg, "backupentry", be.Name)
+		return extensionscontroller.ReconcileErr(err)
+	}
+
+	if err := extensionscontroller.RemoveAnnotation(ctx, r.client, be, gardencorev1beta1constants.GardenerOperation); err != nil {
+		r.logger.Error(err, "Error removing annotation from backupentry", "backupentry", be.Name)
+		return reconcile.Result{}, err
+	}
+
+	msg := "Successfully restored backupentry"
+	r.logger.Info(msg, "backupentry", be.Name)
+	r.recorder.Event(be, corev1.EventTypeNormal, EventBackupEntryRestoration, msg)
+	if err := r.updateStatusSuccess(ctx, be, operationType, msg); err != nil {
 		return reconcile.Result{}, err
 	}
 

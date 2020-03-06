@@ -22,6 +22,7 @@ import (
 	"github.com/gardener/gardener-extensions/pkg/util"
 
 	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
+	gardencorev1beta1constants "github.com/gardener/gardener/pkg/apis/core/v1beta1/constants"
 	gardencorev1beta1helper "github.com/gardener/gardener/pkg/apis/core/v1beta1/helper"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
 	"github.com/go-logr/logr"
@@ -94,6 +95,11 @@ func (r *reconciler) Reconcile(request reconcile.Request) (reconcile.Result, err
 		return reconcile.Result{}, err
 	}
 
+	// At the moment migration is not need for this controller
+	if opAnnotation, ok := network.Annotations[gardencorev1beta1constants.GardenerOperation]; ok && opAnnotation == gardencorev1beta1constants.GardenerOperationMigrate {
+		return reconcile.Result{}, extensionscontroller.RemoveAnnotation(r.ctx, r.client, network, gardencorev1beta1constants.GardenerOperation)
+	}
+
 	if network.DeletionTimestamp != nil {
 		return r.delete(r.ctx, network, cluster)
 	}
@@ -102,6 +108,11 @@ func (r *reconciler) Reconcile(request reconcile.Request) (reconcile.Result, err
 }
 
 func (r *reconciler) reconcile(ctx context.Context, network *extensionsv1alpha1.Network, cluster *extensionscontroller.Cluster) (reconcile.Result, error) {
+	if err := extensionscontroller.RemoveAnnotation(ctx, r.client, network, gardencorev1beta1constants.GardenerOperation); err != nil {
+		r.logger.Info("failed to remove operationAnnotation, %v", err)
+		return reconcile.Result{}, err
+	}
+
 	if err := extensionscontroller.EnsureFinalizer(ctx, r.client, FinalizerName, network); err != nil {
 		return reconcile.Result{}, err
 	}

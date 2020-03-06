@@ -176,6 +176,7 @@ func DefaultInitializer(c client.Client, main, variables string, tfvars []byte, 
 				return err
 			}
 		}
+
 		return nil
 	})
 }

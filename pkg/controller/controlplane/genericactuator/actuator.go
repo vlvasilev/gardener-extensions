@@ -451,6 +451,27 @@ func (a *actuator) deleteControlPlane(
 	return nil
 }
 
+// Migrate delete onli the operation annotation Migrate
+func (a *actuator) Migrate(
+	ctx context.Context,
+	cp *extensionsv1alpha1.ControlPlane,
+	cluster *extensionscontroller.Cluster,
+) error {
+	return extensionscontroller.RemoveAnnotation(ctx, a.client, cp, v1beta1constants.GardenerOperation)
+}
+
+// Restore invokes Reconcile and remove operation annotation Restore
+func (a *actuator) Restore(
+	ctx context.Context,
+	cp *extensionsv1alpha1.ControlPlane,
+	cluster *extensionscontroller.Cluster,
+) (bool, error) {
+	if result, err := a.Reconcile(ctx, cp, cluster); err != nil || !result {
+		return result, err
+	}
+	return true, extensionscontroller.RemoveAnnotation(ctx, a.client, cp, v1beta1constants.GardenerOperation)
+}
+
 // computeChecksums computes and returns all needed checksums. This includes the checksums for the given deployed secrets,
 // as well as the cloud provider secret and configmap that are fetched from the cluster.
 func (a *actuator) computeChecksums(

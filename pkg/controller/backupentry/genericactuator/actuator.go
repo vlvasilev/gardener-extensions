@@ -20,6 +20,7 @@ import (
 	extensionscontroller "github.com/gardener/gardener-extensions/pkg/controller"
 	"github.com/gardener/gardener-extensions/pkg/controller/backupentry"
 
+	gardencorev1beta1constants "github.com/gardener/gardener/pkg/apis/core/v1beta1/constants"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
 	kutil "github.com/gardener/gardener/pkg/utils/kubernetes"
 	"github.com/go-logr/logr"
@@ -107,4 +108,18 @@ func (a *actuator) deployEtcdBackupSecret(ctx context.Context, be *extensionsv1a
 // Delete deletes the BackupEntry
 func (a *actuator) Delete(ctx context.Context, be *extensionsv1alpha1.BackupEntry) error {
 	return a.backupEntryDelegate.Delete(ctx, be)
+}
+
+// Migrate remove operrationAnnotation
+func (a *actuator) Migrate(ctx context.Context, be *extensionsv1alpha1.BackupEntry) error {
+	return extensionscontroller.RemoveAnnotation(ctx, a.client, be, gardencorev1beta1constants.GardenerOperation)
+}
+
+// Restore invokes Reconcile
+func (a *actuator) Restore(ctx context.Context, be *extensionsv1alpha1.BackupEntry) error {
+	err := a.Reconcile(ctx, be)
+	if err != nil {
+		return err
+	}
+	return extensionscontroller.RemoveAnnotation(ctx, a.client, be, gardencorev1beta1constants.GardenerOperation)
 }

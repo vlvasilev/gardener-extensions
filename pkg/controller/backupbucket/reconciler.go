@@ -21,8 +21,10 @@ import (
 	extensionscontroller "github.com/gardener/gardener-extensions/pkg/controller"
 	"github.com/gardener/gardener-extensions/pkg/util"
 	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
+	gardencorev1beta1constants "github.com/gardener/gardener/pkg/apis/core/v1beta1/constants"
 	gardencorev1beta1helper "github.com/gardener/gardener/pkg/apis/core/v1beta1/helper"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
+
 	"github.com/go-logr/logr"
 
 	corev1 "k8s.io/api/core/v1"
@@ -87,6 +89,11 @@ func (r *reconciler) Reconcile(request reconcile.Request) (reconcile.Result, err
 		return reconcile.Result{}, err
 	}
 
+	// At the moment migration is not need for this controller
+	if opAnnotation, ok := bb.Annotations[gardencorev1beta1constants.GardenerOperation]; ok && opAnnotation == gardencorev1beta1constants.GardenerOperationMigrate {
+		return reconcile.Result{}, extensionscontroller.RemoveAnnotation(r.ctx, r.client, bb, gardencorev1beta1constants.GardenerOperation)
+	}
+
 	if bb.DeletionTimestamp != nil {
 		return r.delete(r.ctx, bb)
 	}
@@ -121,6 +128,11 @@ func (r *reconciler) reconcile(ctx context.Context, bb *extensionsv1alpha1.Backu
 		_ = r.updateStatusError(ctx, extensionscontroller.ReconcileErrCauseOrErr(err), bb, operationType, msg)
 		r.logger.Error(err, msg, "backupbucket", bb.Name)
 		return extensionscontroller.ReconcileErr(err)
+	}
+
+	if err := extensionscontroller.RemoveAnnotation(r.ctx, r.client, bb, gardencorev1beta1constants.GardenerOperation); err != nil {
+		r.logger.Info("failed to remove operationAnnotation, %v", err)
+		return reconcile.Result{}, err
 	}
 
 	msg := "Successfully reconciled backupbucket"
