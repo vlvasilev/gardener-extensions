@@ -28,4 +28,10 @@ type Actuator interface {
 	Reconcile(context.Context, *extensionsv1alpha1.Infrastructure, *extensionscontroller.Cluster) error
 	// Delete the Infrastructure config.
 	Delete(context.Context, *extensionsv1alpha1.Infrastructure, *extensionscontroller.Cluster) error
+	// Restore takes the state of the Infrastrucure and apply it to the terraform pod output state
+	// before calling the erraform job
+	Restore(context.Context, *extensionsv1alpha1.Infrastructure, *extensionscontroller.Cluster) error
+	// Migrate delete the terrarom k8s resources whithout deleting
+	// the corresponding resources in the IaaS provider
+	Migrate(context.Context, *extensionsv1alpha1.Infrastructure, *extensionscontroller.Cluster) error
 }
