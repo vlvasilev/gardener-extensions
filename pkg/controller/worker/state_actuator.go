@@ -17,6 +17,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	extensionscontroller "github.com/gardener/gardener-extensions/pkg/controller"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
@@ -68,10 +69,12 @@ func (a *genericStateActuator) updateWorkerState(ctx context.Context, worker *ex
 	if err != nil {
 		return err
 	}
+	fmt.Printf("Worker state: %v\n", state)
 	rawState, err := json.Marshal(state)
 	if err != nil {
 		return err
 	}
+	fmt.Printf("^^^^^^^^^^^^^^^^^*****************************&&&&&&&&&&&&&&&&&&&&Worker rawState: %v\n", rawState)
 	return extensionscontroller.TryUpdateStatus(ctx, retry.DefaultBackoff, a.client, worker, func() error {
 		worker.Status.State = &runtime.RawExtension{Raw: rawState}
 		return nil
@@ -83,17 +86,17 @@ func (a *genericStateActuator) getWorkerState(ctx context.Context, namespace str
 	if err := a.client.List(ctx, existingMachineDeployments, client.InNamespace(namespace)); err != nil {
 		return nil, err
 	}
-
+	fmt.Printf("Existing Machine Deployments: %v\n", existingMachineDeployments)
 	machineSets, err := a.getExistingMachineSetsMap(ctx, namespace)
 	if err != nil {
 		return nil, err
 	}
-
+	fmt.Printf("Existing Machine Sets: %v\n", machineSets)
 	machines, err := a.getExistingMachinesMap(ctx, namespace)
 	if err != nil {
 		return nil, err
 	}
-
+	fmt.Printf("Existing Machines: %v\n", machines)
 	workerState := make(map[string]*MachineDeploymentState)
 	for _, deployment := range existingMachineDeployments.Items {
 		machineDeploymentState := &MachineDeploymentState{}
@@ -104,6 +107,7 @@ func (a *genericStateActuator) getWorkerState(ctx context.Context, namespace str
 		if !ok {
 			continue
 		}
+		fmt.Printf("AddMachineSetToMachineDeploymentState %v\n", machineDeploymentMachineSets)
 		addMachineSetToMachineDeploymentState(machineDeploymentMachineSets, machineDeploymentState)
 
 		for _, machineSet := range machineDeploymentMachineSets {
@@ -113,10 +117,11 @@ func (a *genericStateActuator) getWorkerState(ctx context.Context, namespace str
 			}
 
 			for index := range currentMachines {
+				fmt.Printf("addMachineToMachineDeploymentState %v\n", machineDeploymentState)
 				addMachineToMachineDeploymentState(&currentMachines[index], machineDeploymentState)
 			}
 		}
-
+		fmt.Print("******DONE for MachineDeoplyment\n")
 		workerState[deployment.Name] = machineDeploymentState
 	}
 

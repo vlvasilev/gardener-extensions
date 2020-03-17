@@ -100,11 +100,17 @@ func (r *stateReconciler) Reconcile(request reconcile.Request) (reconcile.Result
 	// Reconcile flow
 	operationType := gardencorev1beta1helper.ComputeOperationType(worker.ObjectMeta, worker.Status.LastOperation)
 	if operationType != gardencorev1beta1.LastOperationTypeReconcile {
+		msg := "*********REQUEUE"
+		r.logger.Info(msg, "worker", fmt.Sprintf("%s/%s", worker.Namespace, worker.Name))
 		return reconcile.Result{Requeue: true}, nil
 	} else if isWorkerMigrated(worker) {
+		msg := "*********Nothing to do"
+		r.logger.Info(msg, "worker", fmt.Sprintf("%s/%s", worker.Namespace, worker.Name))
 		//Nothing to do
 		return reconcile.Result{}, nil
 	}
+
+	r.logger.Info("SHIT", "worker", fmt.Sprintf("%s/%s", worker.Namespace, worker.Name))
 
 	r.recorder.Event(worker, corev1.EventTypeNormal, StartToSyncState, "Updating the worker state")
 
