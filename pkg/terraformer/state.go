@@ -22,7 +22,10 @@ import (
 	kutil "github.com/gardener/gardener/pkg/utils/kubernetes"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 type terraformStateV3 struct {
@@ -159,4 +162,38 @@ func sniffJSONStateVersion(stateConfigMap []byte) (uint64, error) {
 	}
 
 	return *sniff.Version, nil
+}
+
+func (*CreateState) Initialize(ctx context.Context, c client.Client, namespace, name string) error {
+	var err error
+
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name},
+		Data: map[string]string{
+			StateKey: "",
+		},
+	}
+
+	if err = c.Create(ctx, configMap); err != nil && !apierrors.IsAlreadyExists(err) {
+		return nil
+	}
+
+	return err
+}
+
+func (cus *CreateOrUpdateState) Initialize(ctx context.Context, c client.Client, namespace, name string) error {
+	if cus.state == nil {
+		return fmt.Errorf("missing state when creating or updating terraform state comfigMap %s/%s", namespace, name)
+	}
+	configMap := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name}}
+
+	_, err := controllerutil.CreateOrUpdate(ctx, c, configMap, func() error {
+		if configMap.Data == nil {
+			configMap.Data = make(map[string]string)
+		}
+		configMap.Data[StateKey] = *cus.state
+		return nil
+	})
+
+	return err
 }

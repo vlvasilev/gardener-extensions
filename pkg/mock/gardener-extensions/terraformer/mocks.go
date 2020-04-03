@@ -305,17 +305,17 @@ func (m *MockFactory) EXPECT() *MockFactoryMockRecorder {
 }
 
 // DefaultInitializer mocks base method
-func (m *MockFactory) DefaultInitializer(arg0 client.Client, arg1, arg2 string, arg3 []byte) terraformer.Initializer {
+func (m *MockFactory) DefaultInitializer(arg0 client.Client, arg1, arg2 string, arg3 []byte, arg4 terraformer.StateConfigMapInitializer) terraformer.Initializer {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DefaultInitializer", arg0, arg1, arg2, arg3)
+	ret := m.ctrl.Call(m, "DefaultInitializer", arg0, arg1, arg2, arg3, arg4)
 	ret0, _ := ret[0].(terraformer.Initializer)
 	return ret0
 }
 
 // DefaultInitializer indicates an expected call of DefaultInitializer
-func (mr *MockFactoryMockRecorder) DefaultInitializer(arg0, arg1, arg2, arg3 interface{}) *gomock.Call {
+func (mr *MockFactoryMockRecorder) DefaultInitializer(arg0, arg1, arg2, arg3, arg4 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DefaultInitializer", reflect.TypeOf((*MockFactory)(nil).DefaultInitializer), arg0, arg1, arg2, arg3)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DefaultInitializer", reflect.TypeOf((*MockFactory)(nil).DefaultInitializer), arg0, arg1, arg2, arg3, arg4)
 }
 
 // New mocks base method
@@ -345,18 +345,4 @@ func (m *MockFactory) NewForConfig(arg0 logrus.FieldLogger, arg1 *rest.Config, a
 func (mr *MockFactoryMockRecorder) NewForConfig(arg0, arg1, arg2, arg3, arg4, arg5 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NewForConfig", reflect.TypeOf((*MockFactory)(nil).NewForConfig), arg0, arg1, arg2, arg3, arg4, arg5)
-}
-
-// StateInitializer mocks base method
-func (m *MockFactory) StateInitializer(arg0 client.Client, arg1, arg2 string, arg3 []byte, arg4 string) terraformer.Initializer {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "StateInitializer", arg0, arg1, arg2, arg3, arg4)
-	ret0, _ := ret[0].(terraformer.Initializer)
-	return ret0
-}
-
-// StateInitializer indicates an expected call of StateInitializer
-func (mr *MockFactoryMockRecorder) StateInitializer(arg0, arg1, arg2, arg3, arg4 interface{}) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StateInitializer", reflect.TypeOf((*MockFactory)(nil).StateInitializer), arg0, arg1, arg2, arg3, arg4)
 }

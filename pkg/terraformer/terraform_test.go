@@ -87,27 +87,58 @@ var _ = Describe("terraformer", func() {
 		})
 	})
 
-	Describe("#CreateStateConfigMap", func() {
-		It("Should create the config map", func() {
-			const (
-				namespace = "namespace"
-				name      = "name"
-			)
+	Describe("#StateConfigMapInitializer", func() {
+		const (
+			namespace = "namespace"
+			name      = "name"
+		)
 
-			var (
-				objectMeta = metav1.ObjectMeta{Namespace: namespace, Name: name}
-				expected   = &corev1.ConfigMap{
-					ObjectMeta: objectMeta,
-					Data: map[string]string{
-						StateKey: "",
-					},
-				}
-			)
+		Describe("#CreateStateConfigMap", func() {
+			It("Should create the config map", func() {
+				var (
+					objectMeta = metav1.ObjectMeta{Namespace: namespace, Name: name}
+					expected   = &corev1.ConfigMap{
+						ObjectMeta: objectMeta,
+						Data: map[string]string{
+							StateKey: "",
+						},
+					}
+					stateConfigMapInitializer = &CreateState{}
+				)
 
-			c.EXPECT().Create(gomock.Any(), expected.DeepCopy())
+				c.EXPECT().Create(gomock.Any(), expected.DeepCopy())
 
-			err := CreateStateConfigMap(context.TODO(), c, namespace, name)
-			Expect(err).NotTo(HaveOccurred())
+				err := stateConfigMapInitializer.Initialize(context.TODO(), c, namespace, name)
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+
+		Describe("#CreateOrUpdateState", func() {
+			It("Should create the config map", func() {
+				var (
+					state      = "state"
+					stateKey   = kutil.Key(namespace, name)
+					objectMeta = metav1.ObjectMeta{Namespace: namespace, Name: name}
+					getState   = &corev1.ConfigMap{ObjectMeta: objectMeta}
+					expected   = &corev1.ConfigMap{
+						ObjectMeta: objectMeta,
+						Data: map[string]string{
+							StateKey: state,
+						},
+					}
+					stateConfigMapInitializer = &CreateOrUpdateState{state: &state}
+					stateNotFound             = apierrors.NewNotFound(configMapGroupResource, name)
+				)
+				gomock.InOrder(
+					c.EXPECT().
+						Get(gomock.Any(), stateKey, getState.DeepCopy()).
+						Return(stateNotFound),
+					c.EXPECT().Create(gomock.Any(), expected.DeepCopy()),
+				)
+
+				err := stateConfigMapInitializer.Initialize(context.TODO(), c, namespace, name)
+				Expect(err).NotTo(HaveOccurred())
+			})
 		})
 	})
 
@@ -204,143 +235,140 @@ var _ = Describe("terraformer", func() {
 
 		Describe("#DefaultInitializer", func() {
 			var (
-				createState                              *corev1.ConfigMap
-				configurationNotFound, variablesNotFound *apierrors.StatusError
-				runInitializer                           func(initializeState bool) error
-			)
-
-			BeforeEach(func() {
-				createState = &corev1.ConfigMap{
-					ObjectMeta: stateObjectMeta,
-					Data: map[string]string{
-						StateKey: "",
-					},
-				}
-				configurationNotFound = apierrors.NewNotFound(configMapGroupResource, configurationName)
-				variablesNotFound = apierrors.NewNotFound(secretGroupResource, variablesName)
-
-				runInitializer = func(initializeState bool) error {
-					return DefaultInitializer(c, main, variables, tfVars).Initialize(&InitializerConfig{
-						Namespace:         namespace,
-						ConfigurationName: configurationName,
-						VariablesName:     variablesName,
-						StateName:         stateName,
-						InitializeState:   initializeState,
-					})
-				}
-			})
-
-			It("should create all resources", func() {
-				gomock.InOrder(
-					c.EXPECT().
-						Get(gomock.Any(), configurationKey, getConfiguration.DeepCopy()).
-						Return(configurationNotFound),
-					c.EXPECT().
-						Create(gomock.Any(), createConfiguration.DeepCopy()),
-
-					c.EXPECT().
-						Get(gomock.Any(), variablesKey, getVariables.DeepCopy()).
-						Return(variablesNotFound),
-					c.EXPECT().
-						Create(gomock.Any(), createVariables.DeepCopy()),
-
-					c.EXPECT().
-						Create(gomock.Any(), createState.DeepCopy()),
-				)
-
-				Expect(runInitializer(true)).NotTo(HaveOccurred())
-			})
-
-			It("should not initialize state when initializeState is false", func() {
-				gomock.InOrder(
-					c.EXPECT().
-						Get(gomock.Any(), configurationKey, getConfiguration.DeepCopy()).
-						Return(configurationNotFound),
-					c.EXPECT().
-						Create(gomock.Any(), createConfiguration.DeepCopy()),
-
-					c.EXPECT().
-						Get(gomock.Any(), variablesKey, getVariables.DeepCopy()).
-						Return(variablesNotFound),
-					c.EXPECT().
-						Create(gomock.Any(), createVariables.DeepCopy()),
-				)
-
-				Expect(runInitializer(false)).NotTo(HaveOccurred())
-			})
-		})
-
-		Describe("#StateInitializer", func() {
-			var (
 				state                                                   string
 				createState                                             *corev1.ConfigMap
 				configurationNotFound, variablesNotFound, stateNotFound *apierrors.StatusError
 				runInitializer                                          func(initializeState bool) error
 			)
 
-			BeforeEach(func() {
-				state = "{\"data\": \"some data\"}"
-				createState = &corev1.ConfigMap{
-					ObjectMeta: stateObjectMeta,
-					Data: map[string]string{
-						StateKey: state,
-					},
-				}
-				configurationNotFound = apierrors.NewNotFound(configMapGroupResource, configurationName)
-				variablesNotFound = apierrors.NewNotFound(secretGroupResource, variablesName)
-				stateNotFound = apierrors.NewNotFound(configMapGroupResource, stateName)
+			Context("When there is no init state", func() {
+				BeforeEach(func() {
+					state = ""
+					createState = &corev1.ConfigMap{
+						ObjectMeta: stateObjectMeta,
+						Data: map[string]string{
+							StateKey: state,
+						},
+					}
+					configurationNotFound = apierrors.NewNotFound(configMapGroupResource, configurationName)
+					variablesNotFound = apierrors.NewNotFound(secretGroupResource, variablesName)
 
-				runInitializer = func(initializeState bool) error {
-					return StateInitializer(c, main, variables, tfVars, state).Initialize(&InitializerConfig{
-						Namespace:         namespace,
-						ConfigurationName: configurationName,
-						VariablesName:     variablesName,
-						StateName:         stateName,
-						InitializeState:   initializeState,
-					})
-				}
+					runInitializer = func(initializeState bool) error {
+						return DefaultInitializer(c, main, variables, tfVars, &CreateState{}).Initialize(&InitializerConfig{
+							Namespace:         namespace,
+							ConfigurationName: configurationName,
+							VariablesName:     variablesName,
+							StateName:         stateName,
+							InitializeState:   initializeState,
+						})
+					}
+				})
+
+				It("should create all resources", func() {
+					gomock.InOrder(
+						c.EXPECT().
+							Get(gomock.Any(), configurationKey, getConfiguration.DeepCopy()).
+							Return(configurationNotFound),
+						c.EXPECT().
+							Create(gomock.Any(), createConfiguration.DeepCopy()),
+
+						c.EXPECT().
+							Get(gomock.Any(), variablesKey, getVariables.DeepCopy()).
+							Return(variablesNotFound),
+						c.EXPECT().
+							Create(gomock.Any(), createVariables.DeepCopy()),
+
+						c.EXPECT().
+							Create(gomock.Any(), createState.DeepCopy()),
+					)
+
+					Expect(runInitializer(true)).NotTo(HaveOccurred())
+				})
+
+				It("should not initialize state when initializeState is false", func() {
+					gomock.InOrder(
+						c.EXPECT().
+							Get(gomock.Any(), configurationKey, getConfiguration.DeepCopy()).
+							Return(configurationNotFound),
+						c.EXPECT().
+							Create(gomock.Any(), createConfiguration.DeepCopy()),
+
+						c.EXPECT().
+							Get(gomock.Any(), variablesKey, getVariables.DeepCopy()).
+							Return(variablesNotFound),
+						c.EXPECT().
+							Create(gomock.Any(), createVariables.DeepCopy()),
+					)
+
+					Expect(runInitializer(false)).NotTo(HaveOccurred())
+				})
 			})
 
-			It("should create all resources", func() {
-				gomock.InOrder(
-					c.EXPECT().
-						Get(gomock.Any(), configurationKey, getConfiguration.DeepCopy()).
-						Return(configurationNotFound),
-					c.EXPECT().
-						Create(gomock.Any(), createConfiguration.DeepCopy()),
+			Context("When there is init state", func() {
+				BeforeEach(func() {
+					state = "{\"data\":\"big data\"}"
+					createState = &corev1.ConfigMap{
+						ObjectMeta: stateObjectMeta,
+						Data: map[string]string{
+							StateKey: state,
+						},
+					}
+					configurationNotFound = apierrors.NewNotFound(configMapGroupResource, configurationName)
+					variablesNotFound = apierrors.NewNotFound(secretGroupResource, variablesName)
+					stateNotFound = apierrors.NewNotFound(configMapGroupResource, stateName)
 
-					c.EXPECT().
-						Get(gomock.Any(), variablesKey, getVariables.DeepCopy()).
-						Return(variablesNotFound),
-					c.EXPECT().
-						Create(gomock.Any(), createVariables.DeepCopy()),
+					runInitializer = func(initializeState bool) error {
+						return DefaultInitializer(c, main, variables, tfVars, &CreateOrUpdateState{state: &state}).Initialize(&InitializerConfig{
+							Namespace:         namespace,
+							ConfigurationName: configurationName,
+							VariablesName:     variablesName,
+							StateName:         stateName,
+							InitializeState:   initializeState,
+						})
+					}
+				})
 
-					c.EXPECT().
-						Get(gomock.Any(), stateKey, getState.DeepCopy()).
-						Return(stateNotFound),
-					c.EXPECT().
-						Create(gomock.Any(), createState.DeepCopy()),
-				)
+				It("should create all resources", func() {
+					gomock.InOrder(
+						c.EXPECT().
+							Get(gomock.Any(), configurationKey, getConfiguration.DeepCopy()).
+							Return(configurationNotFound),
+						c.EXPECT().
+							Create(gomock.Any(), createConfiguration.DeepCopy()),
 
-				Expect(runInitializer(true)).NotTo(HaveOccurred())
-			})
+						c.EXPECT().
+							Get(gomock.Any(), variablesKey, getVariables.DeepCopy()).
+							Return(variablesNotFound),
+						c.EXPECT().
+							Create(gomock.Any(), createVariables.DeepCopy()),
 
-			It("should not initialize state when initializeState is false", func() {
-				gomock.InOrder(
-					c.EXPECT().
-						Get(gomock.Any(), configurationKey, getConfiguration.DeepCopy()).
-						Return(configurationNotFound),
-					c.EXPECT().
-						Create(gomock.Any(), createConfiguration.DeepCopy()),
+						c.EXPECT().
+							Get(gomock.Any(), stateKey, getState.DeepCopy()).
+							Return(stateNotFound),
+						c.EXPECT().
+							Create(gomock.Any(), createState.DeepCopy()),
+					)
 
-					c.EXPECT().
-						Get(gomock.Any(), variablesKey, getVariables.DeepCopy()).
-						Return(variablesNotFound),
-					c.EXPECT().
-						Create(gomock.Any(), createVariables.DeepCopy()),
-				)
+					Expect(runInitializer(true)).NotTo(HaveOccurred())
+				})
 
-				Expect(runInitializer(false)).NotTo(HaveOccurred())
+				It("should not initialize state when initializeState is false", func() {
+					gomock.InOrder(
+						c.EXPECT().
+							Get(gomock.Any(), configurationKey, getConfiguration.DeepCopy()).
+							Return(configurationNotFound),
+						c.EXPECT().
+							Create(gomock.Any(), createConfiguration.DeepCopy()),
+
+						c.EXPECT().
+							Get(gomock.Any(), variablesKey, getVariables.DeepCopy()).
+							Return(variablesNotFound),
+						c.EXPECT().
+							Create(gomock.Any(), createVariables.DeepCopy()),
+					)
+
+					Expect(runInitializer(false)).NotTo(HaveOccurred())
+				})
 			})
 		})
 	})
